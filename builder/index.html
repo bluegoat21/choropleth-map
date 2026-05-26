@@ -95,12 +95,25 @@
     position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
     z-index: 1000; background: rgba(255,255,255,0.97);
     padding: 8px 18px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);
-    font-size: 14px; font-weight: 600; max-width: 60%; text-align: center;
+    font-size: 14px; font-weight: 600; max-width: 50%; text-align: center;
   }
   #title-overlay input {
     border: none; background: transparent; font-size: inherit; font-weight: inherit;
     text-align: center; width: 100%; outline: none; font-family: inherit;
   }
+  /* 保存・共有: タイトル右横の独立フローティング */
+  #export-floating {
+    position: absolute; top: 16px; right: 20px; z-index: 1002;
+    width: auto;  /* .dropdown の width:100% を上書き */
+  }
+  #export-floating .dropdown-trigger {
+    width: auto;
+    background: #fff; padding: 8px 14px; font-size: 13px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    gap: 8px;
+  }
+  #export-floating .dropdown-trigger:hover { background: #f3f4f6; }
+  #export-floating .dropdown-menu { min-width: 260px; right: 0; left: auto; }
   #control-panel {
     position: absolute; top: 70px; right: 20px; z-index: 1000;
     background: rgba(255,255,255,0.98); padding: 12px 14px;
@@ -271,6 +284,16 @@
     <div id="map"></div>
     <div id="title-overlay">
       <input id="map-title" type="text" value="エリア別検索Vol可視化">
+    </div>
+    <div id="export-floating" class="dropdown">
+      <button class="dropdown-trigger" id="export-trigger">
+        <span>💾 保存・共有</span><span class="caret">▼</span>
+      </button>
+      <div class="dropdown-menu" id="export-menu">
+        <button data-export="png">🖼 PNG画像として保存 <span class="sub">(マップ + 凡例)</span></button>
+        <button data-export="html">📄 HTMLとして保存 <span class="sub">(ブラウザのページ保存)</span></button>
+        <button data-export="url">🔗 設定リンクをコピー <span class="sub">(現在の状態を共有)</span></button>
+      </div>
     </div>
     <div id="control-panel"></div>
     <div id="legend"><div id="legend-content"></div></div>
@@ -692,18 +715,6 @@ function buildControlPanel() {
         <select id="diff-b">${kws.map(k => `<option value="${escape(k)}" ${k === state.diffCols.b ? 'selected' : ''}>${escape(k)}</option>`).join('')}</select>
       </div>
     </div>
-    <div class="section">
-      <div class="dropdown" id="export-dropdown">
-        <button class="dropdown-trigger" id="export-trigger">
-          <span>💾 保存・共有</span><span class="caret">▼</span>
-        </button>
-        <div class="dropdown-menu" id="export-menu">
-          <button data-export="png">🖼 PNG画像として保存 <span class="sub">(マップ + 凡例)</span></button>
-          <button data-export="html">📄 HTMLとして保存 <span class="sub">(ブラウザのページ保存)</span></button>
-          <button data-export="url">🔗 設定リンクをコピー <span class="sub">(現在の状態を共有)</span></button>
-        </div>
-      </div>
-    </div>
   `;
 
   panel.addEventListener('change', e => {
@@ -755,25 +766,31 @@ function buildControlPanel() {
         ? '<span class="caret">▲</span> 折りたたむ'
         : `<span class="caret">▼</span> すべて表示 (${state.mapping.kwCols.length}件)`;
     }
-    // エクスポートドロップダウン
-    else if (e.target.id === 'export-trigger' || e.target.closest('#export-trigger')) {
-      document.getElementById('export-menu').classList.toggle('open');
-    }
-    else if (e.target.dataset.export) {
-      const kind = e.target.dataset.export;
-      document.getElementById('export-menu').classList.remove('open');
-      if (kind === 'png') exportPNG();
-      else if (kind === 'html') exportHTML();
-      else if (kind === 'url') shareURL();
-    }
-  });
-  // メニュー外クリックで閉じる
-  document.addEventListener('click', e => {
-    if (!e.target.closest('#export-dropdown')) {
-      document.getElementById('export-menu')?.classList.remove('open');
-    }
   });
 }
+
+// エクスポートドロップダウン (パネル外フローティング)
+document.addEventListener('click', e => {
+  // トリガークリック → メニュー開閉
+  if (e.target.closest('#export-trigger')) {
+    document.getElementById('export-menu').classList.toggle('open');
+    return;
+  }
+  // メニュー項目クリック → アクション実行
+  const itemBtn = e.target.closest('#export-menu button[data-export]');
+  if (itemBtn) {
+    document.getElementById('export-menu').classList.remove('open');
+    const kind = itemBtn.dataset.export;
+    if (kind === 'png') exportPNG();
+    else if (kind === 'html') exportHTML();
+    else if (kind === 'url') shareURL();
+    return;
+  }
+  // 外側クリック → メニュー閉じる
+  if (!e.target.closest('#export-floating')) {
+    document.getElementById('export-menu')?.classList.remove('open');
+  }
+});
 function syncKwChecks() {
   document.querySelectorAll('#kw-list input[data-kw]').forEach(cb => {
     cb.checked = state.selectedKws.includes(cb.dataset.kw);
