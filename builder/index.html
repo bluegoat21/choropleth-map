@@ -643,11 +643,19 @@ function restyle() {
     updateLegendHeat(maxV);
   } else {
     const scores = computeDiffScores();
-    baseStyleFn = f => ({
-      fillColor: colorDiff(scores[f.properties._code]),
-      color: '#666', weight: 0.3, fillOpacity: 0.78,
-    });
+    baseStyleFn = f => {
+      const s = scores[f.properties._code];
+      if (s == null) {
+        // データなし(両列とも0など) → 完全に透明にする
+        return { fillColor: '#fff', color: '#666', weight: 0.3, fillOpacity: 0 };
+      }
+      return {
+        fillColor: colorDiff(s),
+        color: '#666', weight: 0.3, fillOpacity: 0.78,
+      };
+    };
     updateLegendDiff();
+    updateDiffFormula();
   }
   const styleFn = f => passesFilter(f.properties) ? baseStyleFn(f) : filteredStyle();
   state.layer.options.style = styleFn;
@@ -708,12 +716,13 @@ function buildControlPanel() {
     </div>
     <div class="section" id="diff-section" style="display:none;">
       <h4>差分マップの2列</h4>
-      <div style="margin-bottom:4px;">🔴 赤(マイナス側):
+      <div style="margin-bottom:4px;"><span style="color:#d73027;">🔴 赤</span> に塗りたい列:
         <select id="diff-a">${kws.map(k => `<option value="${escape(k)}" ${k === state.diffCols.a ? 'selected' : ''}>${escape(k)}</option>`).join('')}</select>
       </div>
-      <div>🔵 青(プラス側):
+      <div><span style="color:#2166ac;">🔵 青</span> に塗りたい列:
         <select id="diff-b">${kws.map(k => `<option value="${escape(k)}" ${k === state.diffCols.b ? 'selected' : ''}>${escape(k)}</option>`).join('')}</select>
       </div>
+      <div id="diff-formula" style="margin-top:8px;padding:6px 8px;background:#f5f5f5;border-radius:4px;font-size:10px;color:#444;line-height:1.5;"></div>
     </div>
   `;
 
@@ -820,11 +829,18 @@ function updateLegendDiff() {
     <div style="width:220px;height:14px;background:linear-gradient(to right,#d73027,#f7f7f7,#2166ac);border:1px solid #999;"></div>
     <div style="display:flex;justify-content:space-between;width:220px;margin-top:2px;font-size:11px;">
       <span>← ${escape(a)}優勢</span><span>拮抗</span><span>${escape(b)}優勢 →</span>
-    </div>
-    <div style="margin-top:8px;display:flex;align-items:center;gap:6px;">
-      <div style="width:14px;height:14px;background:#cccccc;border:1px solid #999;"></div>
-      <span style="font-size:11px;">データなし</span>
     </div>`;
+}
+
+function updateDiffFormula() {
+  const el = document.getElementById('diff-formula');
+  if (!el) return;
+  const { a, b } = state.diffCols;
+  el.innerHTML =
+    '<div style="font-weight:600;margin-bottom:3px;">💡 着色ロジック</div>' +
+    `<div><b>${escape(a)}</b> が多いエリアは <span style="color:#d73027;font-weight:600;">🔴 赤</span></div>` +
+    `<div><b>${escape(b)}</b> が多いエリアは <span style="color:#2166ac;font-weight:600;">🔵 青</span></div>` +
+    `<div style="margin-top:4px;color:#888;">計算式: (<b>${escape(b)}</b> − <b>${escape(a)}</b>) ÷ (<b>${escape(a)}</b> + <b>${escape(b)}</b>)</div>`;
 }
 
 function updateStatusBar() {
