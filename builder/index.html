@@ -722,7 +722,10 @@ function buildControlPanel() {
       <div><span style="color:#2166ac;">🔵 青</span> に塗りたい列:
         <select id="diff-b">${kws.map(k => `<option value="${escape(k)}" ${k === state.diffCols.b ? 'selected' : ''}>${escape(k)}</option>`).join('')}</select>
       </div>
-      <div id="diff-formula" style="margin-top:8px;padding:6px 8px;background:#f5f5f5;border-radius:4px;font-size:10px;color:#444;line-height:1.5;"></div>
+      <details style="margin-top:8px;">
+        <summary style="font-size:11px;color:#555;">着色ロジックの詳細</summary>
+        <div id="diff-formula" style="margin-top:4px;padding:6px 8px;background:#f5f5f5;border-radius:4px;font-size:10px;color:#444;line-height:1.5;"></div>
+      </details>
     </div>
   `;
 
@@ -829,6 +832,10 @@ function updateLegendDiff() {
     <div style="width:220px;height:14px;background:linear-gradient(to right,#d73027,#f7f7f7,#2166ac);border:1px solid #999;"></div>
     <div style="display:flex;justify-content:space-between;width:220px;margin-top:2px;font-size:11px;">
       <span>← ${escape(a)}優勢</span><span>拮抗</span><span>${escape(b)}優勢 →</span>
+    </div>
+    <div style="margin-top:8px;display:flex;align-items:center;gap:6px;">
+      <div style="width:14px;height:14px;background:#fff;border:1px solid #333;"></div>
+      <span style="font-size:11px;">データなし</span>
     </div>`;
 }
 
