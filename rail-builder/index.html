@@ -294,20 +294,12 @@
           <label>駅名列 (任意):</label>
           <select id="map-station-name"><option value="">(なし)</option></select>
         </div>
-        <div class="mapping-row">
-          <label>路線/事業者列 (任意):</label>
-          <select id="map-station-extra"><option value="">(なし)</option></select>
-        </div>
       </div>
 
       <div id="line-mapping" style="display:none">
         <div class="mapping-row">
           <label>路線名列:</label>
           <select id="map-line-name"></select>
-        </div>
-        <div class="mapping-row">
-          <label>事業者列 (任意):</label>
-          <select id="map-line-operator"><option value="">(なし)</option></select>
         </div>
       </div>
 
@@ -471,17 +463,11 @@ function showMapping() {
   const stationNameCol = fields.find(f => /駅名|station.?name|name/i.test(f)) || '';
   fillSelect(document.getElementById('map-station-name'),
     [{ value: '', label: '(なし)' }, ...fields.map(f => ({ value: f, label: f }))], stationNameCol);
-  const extraCol = fields.find(f => /路線|line|事業者|operator/i.test(f)) || '';
-  fillSelect(document.getElementById('map-station-extra'),
-    [{ value: '', label: '(なし)' }, ...fields.map(f => ({ value: f, label: f }))], extraCol);
 
   // 路線マッピング
   const lineNameCol = fields.find(f => /路線名|line.?name|name/i.test(f)) || fields[0];
   fillSelect(document.getElementById('map-line-name'),
     fields.map(f => ({ value: f, label: f })), lineNameCol);
-  const opCol = fields.find(f => /事業者|operator|company/i.test(f)) || '';
-  fillSelect(document.getElementById('map-line-operator'),
-    [{ value: '', label: '(なし)' }, ...fields.map(f => ({ value: f, label: f }))], opCol);
 
   rebuildKeywordList();
 }
@@ -494,10 +480,8 @@ function rebuildKeywordList() {
     excludeCols.add(document.getElementById('map-lat').value);
     excludeCols.add(document.getElementById('map-lng').value);
     excludeCols.add(document.getElementById('map-station-name').value);
-    excludeCols.add(document.getElementById('map-station-extra').value);
   } else {
     excludeCols.add(document.getElementById('map-line-name').value);
-    excludeCols.add(document.getElementById('map-line-operator').value);
   }
   const numericFields = fields.filter(f => {
     if (excludeCols.has(f)) return false;
@@ -528,13 +512,11 @@ document.getElementById('go-render').onclick = async () => {
     if (!latCol || !lngCol) { alert('緯度・経度列を指定してください'); return; }
     state.mapping = { dataType, latCol, lngCol,
       nameCol: document.getElementById('map-station-name').value,
-      extraCol: document.getElementById('map-station-extra').value,
       kwCols };
   } else {
     const nameCol = document.getElementById('map-line-name').value;
     if (!nameCol) { alert('路線名列を指定してください'); return; }
-    state.mapping = { dataType, nameCol,
-      opCol: document.getElementById('map-line-operator').value, kwCols };
+    state.mapping = { dataType, nameCol, kwCols };
   }
   await renderMap();
 };
@@ -542,7 +524,7 @@ document.getElementById('go-render').onclick = async () => {
 document.getElementById('link-reset').onclick = e => { e.preventDefault(); location.reload(); };
 
 // マッピング画面で列が変わった時のキーワードリスト再構築
-['map-lat','map-lng','map-station-name','map-station-extra','map-line-name','map-line-operator'].forEach(id => {
+['map-lat','map-lng','map-station-name','map-line-name'].forEach(id => {
   document.getElementById(id).addEventListener('change', rebuildKeywordList);
 });
 
@@ -579,7 +561,7 @@ function buildFeatures() {
   const { dataType, kwCols } = state.mapping;
   const features = [];
   if (dataType === 'station') {
-    const { latCol, lngCol, nameCol, extraCol } = state.mapping;
+    const { latCol, lngCol, nameCol } = state.mapping;
     state.csv.rows.forEach((row, i) => {
       const lat = parseFloat(row[latCol]);
       const lng = parseFloat(row[lngCol]);
@@ -587,46 +569,30 @@ function buildFeatures() {
       const props = {
         _id: 's' + i,
         _name: nameCol ? (row[nameCol] || '') : '',
-        _extra: extraCol ? (row[extraCol] || '') : '',
       };
       kwCols.forEach(kw => { props['v_' + kw] = parseFloat(row[kw]) || 0; });
       features.push({ type: 'station', lat, lng, properties: props });
     });
   } else {
-    const { nameCol, opCol } = state.mapping;
-    // CSVを (路線名, 事業者) → row のmapに
-    const rowByKey = new Map();
+    const { nameCol } = state.mapping;
+    // CSVを 路線名 → row のmapに (路線名のみで照合)
+    const rowByName = new Map();
     state.csv.rows.forEach((row, i) => {
       const lineName = String(row[nameCol] || '').trim();
-      if (!lineName) return;
-      const op = opCol ? String(row[opCol] || '').trim() : '';
-      const key = lineName + '|' + op;
-      rowByKey.set(key, { row, op, lineName, idx: i });
+      if (!lineName || rowByName.has(lineName)) return;
+      rowByName.set(lineName, { row, lineName, idx: i });
     });
-    // Atlas featureとjoin
+    // Atlas featureとjoin (路線名のみで照合)
     state.atlas.features.forEach(ft => {
       const lineName = ft.properties['路線名'];
-      const operator = ft.properties['事業者'];
-      // 完全一致 → 部分一致(事業者) の順で照合
-      let matched = null;
-      if (rowByKey.has(lineName + '|' + operator)) {
-        matched = rowByKey.get(lineName + '|' + operator);
-      } else if (rowByKey.has(lineName + '|')) {
-        matched = rowByKey.get(lineName + '|');
-      } else {
-        // operatorナシのCSV: 路線名だけで照合
-        for (const [k, v] of rowByKey) {
-          if (k.startsWith(lineName + '|')) { matched = v; break; }
-        }
-      }
+      const matched = rowByName.get(lineName);
       if (!matched) return;
-      const row = matched.row;
       const props = {
-        _id: 'l' + matched.idx,
+        _id: 'l' + matched.idx + '-' + (ft.properties['事業者'] || ''),
         _name: lineName,
-        _operator: operator,
+        _operator: ft.properties['事業者'] || '',  // Atlas由来の情報をツールチップに表示
       };
-      kwCols.forEach(kw => { props['v_' + kw] = parseFloat(row[kw]) || 0; });
+      kwCols.forEach(kw => { props['v_' + kw] = parseFloat(matched.row[kw]) || 0; });
       features.push({ type: 'line', geometry: ft.geometry, properties: props });
     });
   }
@@ -721,7 +687,6 @@ function restyle() {
 
 function buildTooltip(p, totalVal) {
   let html = `<div style="font-weight:600;margin-bottom:4px;">${escape(p._name || '(無名)')}</div>`;
-  if (p._extra) html += `<div style="color:#666;font-size:11px;">${escape(p._extra)}</div>`;
   if (p._operator) html += `<div style="color:#666;font-size:11px;">${escape(p._operator)}</div>`;
   html += '<table style="font-size:11px;margin-top:4px;border-collapse:collapse;">';
   state.mapping.kwCols.forEach(kw => {
