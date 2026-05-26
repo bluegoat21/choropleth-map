@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Choropleth Map for Japan — エリア別検索Vol可視化ツール</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+                 "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+    color: #222;
+    background: linear-gradient(135deg, #f0f4f8 0%, #d9e2ec 100%);
+    min-height: 100vh;
+  }
+  .container {
+    max-width: 960px; margin: 0 auto; padding: 60px 24px;
+  }
+  .hero {
+    text-align: center; margin-bottom: 48px;
+  }
+  .hero h1 {
+    font-size: 28px; font-weight: 700; margin: 0 0 8px;
+    color: #1f2937;
+  }
+  .hero p {
+    font-size: 15px; color: #4b5563; margin: 0; line-height: 1.6;
+  }
+  .tools {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+    gap: 24px;
+  }
+  .tool-card {
+    background: #fff; border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    padding: 28px; text-decoration: none; color: inherit;
+    transition: transform 0.15s, box-shadow 0.15s;
+    display: flex; flex-direction: column; gap: 12px;
+    border: 2px solid transparent;
+  }
+  .tool-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+    border-color: #3b82f6;
+  }
+  .tool-icon { font-size: 48px; line-height: 1; }
+  .tool-title { font-size: 20px; font-weight: 700; color: #1f2937; }
+  .tool-desc { font-size: 14px; color: #4b5563; line-height: 1.6; margin: 0; }
+  .tool-features {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;
+  }
+  .tool-features .badge {
+    font-size: 11px; padding: 3px 10px; background: #eff6ff;
+    color: #1d4ed8; border-radius: 12px; font-weight: 500;
+  }
+  .footer {
+    margin-top: 60px; text-align: center; color: #6b7280; font-size: 12px;
+  }
+  .footer a { color: #3b82f6; text-decoration: none; }
+  .footer a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="hero">
+    <h1>📊 Choropleth Map for Japan</h1>
+    <p>
+      CSVをアップロードするだけで、エリア別・路線別の検索ボリュームを<br>
+      日本地図に可視化するブラウザツール集
+    </p>
+  </div>
+
+  <div class="tools">
+    <a href="builder/" class="tool-card">
+      <div class="tool-icon">🗾</div>
+      <div class="tool-title">市区町村ツール</div>
+      <p class="tool-desc">
+        全国1700自治体のコロプレスマップ。エリアごとに色分けして検索ボリュームを比較。差分マップで2列を赤青対比することも可能。
+      </p>
+      <div class="tool-features">
+        <span class="badge">ヒートマップ</span>
+        <span class="badge">差分マップ</span>
+        <span class="badge">フィルタ</span>
+        <span class="badge">PNG出力</span>
+      </div>
+    </a>
+
+    <a href="rail-builder/" class="tool-card">
+      <div class="tool-icon">🚉</div>
+      <div class="tool-title">駅・路線ツール</div>
+      <p class="tool-desc">
+        駅は比例シンボル、路線は線の太さで検索ボリュームを表現。駅CSVは緯度経度から自動配置、路線CSVは全国378路線のラインAtlasと結合。
+      </p>
+      <div class="tool-features">
+        <span class="badge">駅(比例シンボル)</span>
+        <span class="badge">路線(ライン太さ)</span>
+        <span class="badge">フィルタ</span>
+        <span class="badge">PNG出力</span>
+      </div>
+    </a>
+  </div>
+
+  <div class="footer">
+    Source: <a href="https://github.com/bluegoat21/choropleth-map">GitHub</a> |
+    GeoJSON: <a href="https://github.com/niiyz/JapanCityGeoJson">niiyz/JapanCityGeoJson</a>,
+    <a href="https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N02-v3_2.html">国土数値情報 N02</a> |
+    Map tiles: <a href="https://carto.com/">CARTO</a>
+  </div>
+</div>
+</body>
+</html>
