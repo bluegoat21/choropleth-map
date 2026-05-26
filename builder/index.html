@@ -341,8 +341,13 @@ function handleCSV(file) {
   Papa.parse(file, {
     header: true, skipEmptyLines: true, dynamicTyping: true,
     complete: result => {
-      // Unnamed的な空列を除去
-      const fields = result.meta.fields.filter(f => f && f.trim() && !f.startsWith('__'));
+      // 空ヘッダ・PapaParse自動命名(_1,_2,__parsed_extra等)を除去
+      const fields = result.meta.fields.filter(f => {
+        if (!f || !String(f).trim()) return false;
+        if (f.startsWith('__')) return false;       // __parsed_extra等
+        if (/^_\d+$/.test(f)) return false;          // _1, _2, _5, _6 など空ヘッダ命名
+        return true;
+      });
       const rows = result.data.map(r => {
         const cleaned = {};
         fields.forEach(f => cleaned[f] = r[f]);
