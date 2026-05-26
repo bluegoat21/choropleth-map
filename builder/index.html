@@ -922,10 +922,14 @@ function applyURLParams() {
   }
   if (p.get('filter')) state.minFilter = parseInt(p.get('filter'), 10) || 0;
   if (p.get('title')) document.getElementById('map-title').value = p.get('title');
-  // パネルに反映
+  // パネルに反映 (state ↔ DOM 同期)
   document.querySelector(`input[name="mode"][value="${state.mode}"]`)?.click();
   document.getElementById('vol-filter').value = state.minFilter;
   syncKwChecks();
+  const selA = document.getElementById('diff-a');
+  const selB = document.getElementById('diff-b');
+  if (selA) selA.value = state.diffCols.a;
+  if (selB) selB.value = state.diffCols.b;
 }
 document.getElementById('map-title').addEventListener('input', updateURLParams);
 
