@@ -1,0 +1,40 @@
+# ===== Cache directories =====
+geojson_cache/
+kw_cache/
+n02_cache/
+
+# ===== Generated output =====
+output/
+sumai_surfin_keyword_map.html
+sumai_surfin_rail_map.html
+
+# ===== 実調査CSV (機密性) =====
+# 注: builder/sample.csv は除外しない (公開してOK)
+*.csv
+!builder/sample.csv
+
+# ===== 路線図プロジェクト (別プロジェクトで管理) =====
+# 別チャットで進行中のため、こちらでは追跡しない
+build_rail_map.py
+prepare_rail_data.py
+stations*.csv
+lines.csv
+top200_stations.csv
+pattern_vols.json
+pivot_data.json
+pivot_top200.csv
+tmp_queries.json
+
+# ===== 引き継ぎ・指示書 (チャットセッション固有のため除外) =====
+地図可視化プロジェクト_引き継ぎ.md
+路線図可視化プロジェクト_引き継ぎ.md
+データ修正指示_388areas.md
+
+# ===== 環境固有 =====
+.claude/
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+.idea/
+.vscode/
