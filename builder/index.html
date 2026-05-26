@@ -116,10 +116,29 @@
   #export-floating .dropdown-menu { min-width: 260px; right: 0; left: auto; }
   #control-panel {
     position: absolute; top: 70px; right: 20px; z-index: 1000;
-    background: rgba(255,255,255,0.98); padding: 12px 14px;
+    background: rgba(255,255,255,0.98); padding: 10px 14px;
     border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.18);
     font-size: 12px; max-width: 280px; max-height: calc(100vh - 100px); overflow-y: auto;
   }
+  /* パネルヘッダ + 最小化ボタン共通 */
+  .panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; margin-bottom: 6px;
+  }
+  .panel-title {
+    font-size: 12px; font-weight: 600; color: #444; user-select: none;
+  }
+  .minimize-btn {
+    background: transparent; border: 1px solid #ccc; cursor: pointer;
+    width: 22px; height: 22px; padding: 0; line-height: 1;
+    border-radius: 4px; font-size: 14px; color: #555;
+    font-family: inherit; display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .minimize-btn:hover { background: #f3f4f6; color: #000; }
+  .minimized .panel-body, .minimized #legend-content { display: none; }
+  .minimized { padding-bottom: 6px; }
+  .minimized .panel-header { margin-bottom: 0; }
   #control-panel .section { border-top: 1px solid #ddd; padding-top: 8px; margin-top: 10px; }
   #control-panel .section:first-child { border-top: none; padding-top: 0; margin-top: 0; }
   #control-panel .section h4 { margin: 0 0 4px; font-size: 12px; font-weight: 600; }
@@ -296,7 +315,13 @@
       </div>
     </div>
     <div id="control-panel"></div>
-    <div id="legend"><div id="legend-content"></div></div>
+    <div id="legend">
+      <div class="panel-header">
+        <div class="panel-title">📍 凡例</div>
+        <button class="minimize-btn" data-target="legend" aria-label="最小化">−</button>
+      </div>
+      <div id="legend-content"></div>
+    </div>
     <div id="status-bar"></div>
   </div>
 
@@ -688,6 +713,11 @@ function buildControlPanel() {
   const panel = document.getElementById('control-panel');
   const kws = state.mapping.kwCols;
   panel.innerHTML = `
+    <div class="panel-header">
+      <div class="panel-title">⚙️ 設定</div>
+      <button class="minimize-btn" data-target="control-panel" aria-label="最小化">−</button>
+    </div>
+    <div class="panel-body">
     <div class="section">
       <h4>表示モード</h4>
       <label><input type="radio" name="mode" value="heat" checked> ヒートマップ</label><br>
@@ -726,6 +756,7 @@ function buildControlPanel() {
         <summary style="font-size:11px;color:#555;">着色ロジックの詳細</summary>
         <div id="diff-formula" style="margin-top:4px;padding:6px 8px;background:#f5f5f5;border-radius:4px;font-size:10px;color:#444;line-height:1.5;"></div>
       </details>
+    </div>
     </div>
   `;
 
@@ -780,6 +811,17 @@ function buildControlPanel() {
     }
   });
 }
+
+// 最小化ボタン (コントロールパネル・凡例 共通)
+document.addEventListener('click', e => {
+  const btn = e.target.closest('.minimize-btn');
+  if (!btn) return;
+  const target = document.getElementById(btn.dataset.target);
+  if (!target) return;
+  const minimized = target.classList.toggle('minimized');
+  btn.textContent = minimized ? '＋' : '−';
+  btn.setAttribute('aria-label', minimized ? '展開' : '最小化');
+});
 
 // エクスポートドロップダウン (パネル外フローティング)
 document.addEventListener('click', e => {
