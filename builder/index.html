@@ -123,6 +123,54 @@
     background: #f9f9f9; border-radius: 4px; cursor: pointer; font-family: inherit;
   }
   #control-panel button.pill:hover { background: #e5e7eb; }
+
+  /* エクスポート: ドロップダウンメニュー */
+  .dropdown { position: relative; display: inline-block; width: 100%; }
+  .dropdown-trigger {
+    width: 100%; padding: 6px 10px; font-size: 12px;
+    border: 1px solid #999; background: #f9f9f9;
+    border-radius: 4px; cursor: pointer; font-family: inherit;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .dropdown-trigger:hover { background: #e5e7eb; }
+  .dropdown-trigger .caret { font-size: 9px; color: #555; }
+  .dropdown-menu {
+    display: none; position: absolute; top: calc(100% + 2px); left: 0; right: 0;
+    background: #fff; border: 1px solid #d1d5db; border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 10001; overflow: hidden;
+  }
+  .dropdown-menu.open { display: block; }
+  .dropdown-menu button {
+    display: block; width: 100%; padding: 8px 12px; border: none;
+    background: transparent; text-align: left; font-size: 12px;
+    cursor: pointer; font-family: inherit; color: #222;
+  }
+  .dropdown-menu button:hover { background: #f3f4f6; }
+  .dropdown-menu button .sub { font-size: 10px; color: #6b7280; margin-left: 4px; }
+
+  /* キーワードリスト: peek (うっすら下に見える) */
+  .kw-section { position: relative; }
+  .kw-section .kw-header { font-weight: 600; font-size: 12px; margin-bottom: 4px; }
+  .kw-section .kw-hint { font-size: 10px; color: #6b7280; margin-bottom: 4px; }
+  .kw-list-wrapper { position: relative; }
+  .kw-list-peek {
+    max-height: 72px; overflow: hidden;
+    -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 55%, rgba(0,0,0,0.05) 100%);
+    mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 55%, rgba(0,0,0,0.05) 100%);
+    transition: max-height 0.25s ease;
+  }
+  .kw-list-peek.expanded {
+    max-height: 320px; overflow-y: auto;
+    -webkit-mask-image: none; mask-image: none;
+  }
+  .kw-toggle {
+    width: 100%; padding: 4px 8px; margin-top: 4px;
+    border: 1px dashed #aaa; background: #fafafa;
+    font-size: 11px; cursor: pointer; font-family: inherit;
+    border-radius: 4px; color: #555;
+    display: flex; align-items: center; justify-content: center; gap: 4px;
+  }
+  .kw-toggle:hover { background: #f0f0f0; color: #000; border-style: solid; }
   #control-panel details summary {
     list-style: none; position: relative; padding-left: 18px;
     font-weight: 600; cursor: pointer; user-select: none; outline: none;
@@ -207,10 +255,6 @@
       <div class="mapping-row">
         <label>エリア名列:</label>
         <select id="map-name"></select>
-      </div>
-      <div class="mapping-row">
-        <label>エリア区分列:</label>
-        <select id="map-kbn"><option value="">(なし)</option></select>
       </div>
       <div style="margin-top: 16px; font-weight: 600; font-size: 13px;">使用する数値列(キーワード):</div>
       <div style="font-size: 11px; color: #666; margin-bottom: 6px;">チェックを外した列は無視されます</div>
@@ -331,11 +375,10 @@ function showMapping() {
   const codeCol = fields.find(f => /市区町村コード|コード|city.?code|code/i.test(f)) || fields[0];
   const nameCol = fields.find(f => /エリア名|市区町村|地域|area.?name|name/i.test(f) && f !== codeCol)
                   || fields.find(f => f !== codeCol);
-  const kbnCol = fields.find(f => /エリア区分|区分|category|kbn/i.test(f)) || '';
 
-  // 数値列を判定 (コード/名前/区分以外で、過半数が数値の列)
+  // 数値列を判定 (コード/名前以外で、過半数が数値の列)
   const numericFields = fields.filter(f => {
-    if (f === codeCol || f === nameCol || f === kbnCol) return false;
+    if (f === codeCol || f === nameCol) return false;
     const vals = rows.map(r => r[f]).filter(v => v !== null && v !== '' && v !== undefined);
     if (vals.length === 0) return false;
     const numeric = vals.filter(v => typeof v === 'number' || !isNaN(parseFloat(v))).length;
@@ -350,8 +393,6 @@ function showMapping() {
     fields.map(f => ({ value: f, label: f })), codeCol);
   fillSelect(document.getElementById('map-name'),
     fields.map(f => ({ value: f, label: f })), nameCol);
-  fillSelect(document.getElementById('map-kbn'),
-    [{ value: '', label: '(なし)' }, ...fields.map(f => ({ value: f, label: f }))], kbnCol);
 
   // 数値列のチェックボックスを構築 (合計・total・sum はデフォルト OFF)
   const kwListEl = document.getElementById('map-keywords');
@@ -369,14 +410,13 @@ document.getElementById('back-upload').onclick = () => {
 document.getElementById('go-render').onclick = async () => {
   const codeCol = document.getElementById('map-code').value;
   const nameCol = document.getElementById('map-name').value;
-  const kbnCol = document.getElementById('map-kbn').value;
   const kwCols = Array.from(document.querySelectorAll('#map-keywords input:checked'))
                       .map(cb => cb.value);
   if (!codeCol || !nameCol || kwCols.length === 0) {
     alert('市区町村コード列、エリア名列、数値列(1つ以上)を指定してください');
     return;
   }
-  state.mapping = { codeCol, nameCol, kbnCol, kwCols };
+  state.mapping = { codeCol, nameCol, kwCols };
   await loadAtlasAndRender();
 };
 
@@ -404,7 +444,7 @@ async function loadAtlasAndRender() {
   }
 
   // CSVから {code → row} のmap作成 (政令市親コードは区コードに展開)
-  const { codeCol, nameCol, kbnCol, kwCols } = state.mapping;
+  const { codeCol, nameCol, kwCols } = state.mapping;
   const codeToRow = {};   // 個別ward code → 元の代表code
   const rowByGroup = {};  // 代表code → CSV row
   let missing = 0;
@@ -435,7 +475,6 @@ async function loadAtlasAndRender() {
       ...ft.properties,
       _code: groupCode,
       _name: row[nameCol] || ft.properties.name,
-      _kbn: kbnCol ? (row[kbnCol] || '') : '',
     };
     // 各キーワード値を埋め込む
     kwCols.forEach(kw => {
@@ -593,7 +632,6 @@ function restyle() {
 // ========================================================================
 function buildTooltip(p) {
   let html = `<div style="font-weight:600;margin-bottom:4px;">${escape(p._name)}</div>`;
-  if (p._kbn) html += `<div style="color:#666;font-size:11px;">${escape(p._kbn)}</div>`;
   html += '<table style="font-size:11px;margin-top:4px;border-collapse:collapse;">';
   state.mapping.kwCols.forEach(kw => {
     const v = p['v_' + kw];
@@ -630,12 +668,15 @@ function buildControlPanel() {
         <button class="pill" data-action="kw-all">全選択</button>
         <button class="pill" data-action="kw-none">全解除</button>
       </div>
-      <details>
-        <summary>キーワード個別選択</summary>
-        <div id="kw-list">
-          ${kws.map(k => `<label><input type="checkbox" data-kw="${escape(k)}" ${k === state.selectedKws[0] ? 'checked' : ''}>${escape(k)}</label>`).join('')}
+      <div class="kw-section">
+        <div class="kw-hint">キーワード個別選択 (${kws.length}件)</div>
+        <div class="kw-list-wrapper">
+          <div id="kw-list" class="kw-list-peek">
+            ${kws.map(k => `<label style="display:block;padding:2px 0;font-size:12px;cursor:pointer;"><input type="checkbox" data-kw="${escape(k)}" ${k === state.selectedKws[0] ? 'checked' : ''}>${escape(k)}</label>`).join('')}
+          </div>
+          <button class="kw-toggle" id="kw-toggle"><span class="caret">▼</span> すべて表示 (${kws.length}件)</button>
         </div>
-      </details>
+      </div>
     </div>
     <div class="section" id="diff-section" style="display:none;">
       <h4>差分マップの2列</h4>
@@ -647,9 +688,16 @@ function buildControlPanel() {
       </div>
     </div>
     <div class="section">
-      <button class="pill" id="export-html">📄 HTML保存</button>
-      <button class="pill" id="export-png">🖼 PNG保存</button>
-      <button class="pill" id="share-url">🔗 リンク取得</button>
+      <div class="dropdown" id="export-dropdown">
+        <button class="dropdown-trigger" id="export-trigger">
+          <span>💾 保存・共有</span><span class="caret">▼</span>
+        </button>
+        <div class="dropdown-menu" id="export-menu">
+          <button data-export="png">🖼 PNG画像として保存 <span class="sub">(マップ + 凡例)</span></button>
+          <button data-export="html">📄 HTMLとして保存 <span class="sub">(ブラウザのページ保存)</span></button>
+          <button data-export="url">🔗 設定リンクをコピー <span class="sub">(現在の状態を共有)</span></button>
+        </div>
+      </div>
     </div>
   `;
 
@@ -693,9 +741,32 @@ function buildControlPanel() {
     const a = e.target.dataset.action;
     if (a === 'kw-all') { state.selectedKws = [...state.mapping.kwCols]; syncKwChecks(); restyle(); }
     else if (a === 'kw-none') { state.selectedKws = []; syncKwChecks(); restyle(); }
-    else if (e.target.id === 'export-html') exportHTML();
-    else if (e.target.id === 'export-png') exportPNG();
-    else if (e.target.id === 'share-url') shareURL();
+    // キーワード peek の展開/折りたたみ
+    else if (e.target.id === 'kw-toggle' || e.target.closest('#kw-toggle')) {
+      const list = document.getElementById('kw-list');
+      const btn = document.getElementById('kw-toggle');
+      const expanded = list.classList.toggle('expanded');
+      btn.innerHTML = expanded
+        ? '<span class="caret">▲</span> 折りたたむ'
+        : `<span class="caret">▼</span> すべて表示 (${state.mapping.kwCols.length}件)`;
+    }
+    // エクスポートドロップダウン
+    else if (e.target.id === 'export-trigger' || e.target.closest('#export-trigger')) {
+      document.getElementById('export-menu').classList.toggle('open');
+    }
+    else if (e.target.dataset.export) {
+      const kind = e.target.dataset.export;
+      document.getElementById('export-menu').classList.remove('open');
+      if (kind === 'png') exportPNG();
+      else if (kind === 'html') exportHTML();
+      else if (kind === 'url') shareURL();
+    }
+  });
+  // メニュー外クリックで閉じる
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#export-dropdown')) {
+      document.getElementById('export-menu')?.classList.remove('open');
+    }
   });
 }
 function syncKwChecks() {

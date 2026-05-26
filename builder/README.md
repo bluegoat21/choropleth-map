@@ -82,7 +82,7 @@ git commit -m "Initial commit"
 GitHub.com で新規リポジトリを作成(例: `choropleth-map`)し、リモート追加:
 
 ```bash
-git remote add origin https://github.com/YOUR_USERNAME/choropleth-map.git
+git remote add origin https://github.com/bluegoat21/choropleth-map.git
 git branch -M main
 git push -u origin main
 ```
@@ -93,7 +93,7 @@ git push -u origin main
 2. 左メニューの **Pages**
 3. **Source** で `main` ブランチ、フォルダは `/ (root)` を選択
 4. **Save**
-5. 1〜2分待つと公開URL発行: `https://YOUR_USERNAME.github.io/choropleth-map/builder/`
+5. 1〜2分待つと公開URL発行: `https://bluegoat21.github.io/choropleth-map/builder/`
 
 ### 3. 確認
 
