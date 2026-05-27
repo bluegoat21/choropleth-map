@@ -882,9 +882,10 @@ function scaleWidth(v, maxV) {
   return 1 + Math.sqrt(v / maxV) * 8;
 }
 function colorHeat(value, maxValue) {
-  if (!value || value <= 0 || !maxValue) return '#f7f4f9';
+  // Vol=0 や データなし は灰色で描画 (背景タイルに溶けないようにややビビッド)
+  if (!value || value <= 0 || !maxValue) return '#9aa0a6';
   const t = Math.min(Math.sqrt(value / maxValue), 1);
-  // 白(247,244,249) → 深紫(63,0,113)
+  // 薄紫(247,244,249) → 深紫(63,0,113)
   const r = Math.round(247 - (247 - 63) * t);
   const g = Math.round(244 - (244 - 0) * t);
   const b = Math.round(249 - (249 - 113) * t);
