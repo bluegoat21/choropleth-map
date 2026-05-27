@@ -1,4 +1,4 @@
-# Choropleth Builder
+# Area Builder
 
 > エリア別の検索ボリュームを日本地図に可視化するブラウザだけで動くツール
 
@@ -15,7 +15,7 @@ CSV をドラッグ&ドロップするだけで、市区町村別の検索ボリ
 ```bash
 cd choropleth-map
 python3 -m http.server 8000
-# ブラウザで http://localhost:8000/builder/ を開く
+# ブラウザで http://localhost:8000/area-builder/ を開く
 ```
 
 ### CSVを用意する
@@ -75,7 +75,7 @@ URLパラメータ例:
 ```bash
 cd choropleth-map
 git init
-git add builder/ build_atlas.py build_map.py README.md
+git add area-builder/ build_atlas.py build_map.py README.md
 git commit -m "Initial commit"
 ```
 
@@ -93,7 +93,7 @@ git push -u origin main
 2. 左メニューの **Pages**
 3. **Source** で `main` ブランチ、フォルダは `/ (root)` を選択
 4. **Save**
-5. 1〜2分待つと公開URL発行: `https://bluegoat21.github.io/choropleth-map/builder/`
+5. 1〜2分待つと公開URL発行: `https://bluegoat21.github.io/choropleth-map/area-builder/`
 
 ### 3. 確認
 
@@ -110,7 +110,7 @@ git push -u origin main
 python3 build_atlas.py
 ```
 
-niiyz/JapanCityGeoJson から最新データを取得し、shapelyで簡略化して `builder/japan-cities.geojson` を上書きします。
+niiyz/JapanCityGeoJson から最新データを取得し、shapelyで簡略化して `area-builder/japan-cities.geojson` を上書きします。
 依存: `pip install requests shapely`
 
 ---
@@ -118,7 +118,7 @@ niiyz/JapanCityGeoJson から最新データを取得し、shapelyで簡略化�
 ## 📁 ファイル構成
 
 ```
-builder/
+area-builder/
 ├── index.html              # Webアプリ本体 (単一HTML)
 ├── japan-cities.geojson    # 全国1902自治体のmerged + simplified GeoJSON (9MB)
 ├── sample.csv              # 雛形CSV (10エリア)

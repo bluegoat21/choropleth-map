@@ -2,7 +2,7 @@
 全国市区町村GeoJSON Atlas ジェネレータ
 
 niiyz/JapanCityGeoJson から全1700+自治体を一括取得 →
-shapelyで頂点間引き → 座標3桁丸め → 単一GeoJSONとして builder/japan-cities.geojson に出力。
+shapelyで頂点間引き → 座標3桁丸め → 単一GeoJSONとして area-builder/japan-cities.geojson に出力。
 
 このAtlasはWebビルダーに静的バンドルされ、CSVの「市区町村コード」と
 joinできる形式: properties.code (5桁), pref, name の3つだけ持つ。
@@ -22,7 +22,7 @@ from shapely.geometry import shape, mapping
 ROOT = Path(__file__).parent
 CACHE_DIR = ROOT / "geojson_cache"
 CACHE_DIR.mkdir(exist_ok=True)
-OUTPUT = ROOT / "builder" / "japan-cities.geojson"
+OUTPUT = ROOT / "area-builder" / "japan-cities.geojson"
 
 GEOJSON_BASE = "https://raw.githubusercontent.com/niiyz/JapanCityGeoJson/master/geojson"
 GH_API_BASE = "https://api.github.com/repos/niiyz/JapanCityGeoJson/contents/geojson"
