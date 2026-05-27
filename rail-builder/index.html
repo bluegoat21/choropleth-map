@@ -423,6 +423,17 @@ function loadEmbeddedSnapshot() {
     // loading 表示が残っていれば消す (保存時のスナップショットで残ってしまった場合の保険)
     const loadingEl = document.getElementById('loading');
     if (loadingEl) loadingEl.classList.add('hide');
+    // 重要: 保存HTMLには「保存時点のLeaflet描画DOM」が焼き込まれている。
+    // それを残したまま initMap すると古いpaneが残ってマーカーが新しいpaneに表示されない。
+    // initMap前に div#map と凡例 contents を完全リセット。
+    const mapDiv = document.getElementById('map');
+    if (mapDiv) {
+      mapDiv.innerHTML = '';
+      // Leaflet が「初期化済みコンテナ」を見分けるための内部マーカーを削除
+      delete mapDiv._leaflet_id;
+    }
+    // state.features を csv+mapping から再構築 (snapshot に含めずrebuild)
+    buildFeatures();
     // 地図の初期化と描画
     initMap();
     buildControlPanel();
