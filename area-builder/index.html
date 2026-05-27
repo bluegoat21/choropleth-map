@@ -310,7 +310,7 @@
       </button>
       <div class="dropdown-menu" id="export-menu">
         <button data-export="png">🖼 PNG画像として保存 <span class="sub">(マップ + 凡例)</span></button>
-        <button data-export="html">📄 HTMLとして保存 <span class="sub">(ブラウザのページ保存)</span></button>
+        <button data-export="html">📄 HTMLとして保存 <span class="sub">(オフラインで再表示可)</span></button>
         <button data-export="url">🔗 設定リンクをコピー <span class="sub">(現在の状態を共有)</span></button>
       </div>
     </div>
@@ -942,9 +942,73 @@ function shareURL() {
     alert('現在の設定URLをクリップボードにコピーしました!\n' + location.href);
   });
 }
+// 自己完結HTMLとして現在の状態を保存
 function exportHTML() {
-  // 現在のページHTMLをそのまま保存 (CSV/Atlasは別途必要)
-  alert('現在のページのアドレス(URL)をブックマークするか、ブラウザの「ページを保存」機能をご利用ください。\n設定状態はURLに含まれます。');
+  if (!state.csv || !state.mapping || !state.features) {
+    alert('まずCSVを読み込んでマップを生成してください');
+    return;
+  }
+  showLoading('HTML生成中...');
+  setTimeout(doExportHTML, 50);
+}
+function doExportHTML() {
+  const tStart = performance.now();
+  console.log('[exportHTML] start');
+  try {
+    // outerHTML 取得前に loading 表示を一時的にhide (保存先HTMLに焼き込まないため)
+    const loadingEl = document.getElementById('loading');
+    const wasShowingLoading = loadingEl && !loadingEl.classList.contains('hide');
+    if (loadingEl) loadingEl.classList.add('hide');
+
+    const doctype = '<!DOCTYPE html>\n';
+    const html = document.documentElement.outerHTML;
+
+    if (wasShowingLoading && loadingEl) loadingEl.classList.remove('hide');
+
+    // 埋め込むスナップショット (Atlasは9.6MBで重いので含めず、JOIN後の features を埋め込み)
+    const snapshot = {
+      csv: state.csv,
+      mapping: state.mapping,
+      features: state.features,
+      mode: state.mode,
+      selectedKws: state.selectedKws,
+      diffCols: state.diffCols,
+      minFilter: state.minFilter,
+      title: document.getElementById('map-title')?.value || '',
+    };
+    const snapshotJSON = JSON.stringify(snapshot);
+    console.log('[exportHTML] snapshot JSON:', (snapshotJSON.length/1048576).toFixed(2), 'MB');
+
+    const snapshotScript =
+      '<script id="ab-snapshot" type="application/json">' +
+      snapshotJSON.replace(/<\/script>/g, '<\\/script>') +
+      '<\/script>';
+    const outputHTML = html.replace(/<\/head>/i, snapshotScript + '\n</head>');
+
+    const blob = new Blob([doctype + outputHTML], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const titleSlug = (document.getElementById('map-title')?.value || 'choropleth')
+      .replace(/[^a-zA-Z0-9一-龯ぁ-んァ-ヶー]/g, '_').slice(0, 40);
+    const filename = `${titleSlug}_${dateStr}.html`;
+
+    const link = document.createElement('a');
+    link.download = filename;
+    link.href = url;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => {
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }, 1500);
+    console.log('[exportHTML] download:', filename, (blob.size/1048576).toFixed(2), 'MB,', Math.round(performance.now() - tStart), 'ms');
+  } catch(e) {
+    console.error('[exportHTML] error:', e);
+    alert('HTML保存失敗: ' + e.message + '\nコンソール(F12)を確認してください');
+  } finally {
+    hideLoading();
+  }
 }
 function exportPNG() {
   showLoading('PNG生成中...');
@@ -969,6 +1033,53 @@ function showLoading(msg) {
 }
 function hideLoading() {
   document.getElementById('loading').classList.add('hide');
+}
+
+// === 自己完結HTML(exportHTML)で保存されたファイルが開かれた時の自動復元 ===
+function loadEmbeddedSnapshot() {
+  const el = document.getElementById('ab-snapshot');
+  if (!el) return false;
+  try {
+    const snap = JSON.parse(el.textContent);
+    state.csv = snap.csv;
+    state.mapping = snap.mapping;
+    state.features = snap.features;  // JOIN後のデータを直接復元 (Atlas再fetch不要)
+    state.mode = snap.mode || 'heat';
+    state.selectedKws = snap.selectedKws || [];
+    state.diffCols = snap.diffCols || { a: null, b: null };
+    state.minFilter = snap.minFilter || 0;
+    // 画面遷移
+    document.getElementById('upload-screen').style.display = 'none';
+    document.getElementById('mapping-screen').style.display = 'none';
+    document.getElementById('map-screen').style.display = 'block';
+    if (snap.title) {
+      const t = document.getElementById('map-title');
+      if (t) t.value = snap.title;
+    }
+    // loading残留対策
+    const loadingEl = document.getElementById('loading');
+    if (loadingEl) loadingEl.classList.add('hide');
+    // 保存時のLeaflet描画DOMをクリアしてからinitMap (二重pane回避)
+    const mapDiv = document.getElementById('map');
+    if (mapDiv) {
+      mapDiv.innerHTML = '';
+      delete mapDiv._leaflet_id;
+    }
+    initMap();
+    buildControlPanel();
+    restyle();
+    updateStatusBar();
+    console.log('[snapshot] 自己完結HTMLから状態を復元');
+    return true;
+  } catch (e) {
+    console.error('[snapshot] 復元失敗:', e);
+    return false;
+  }
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', loadEmbeddedSnapshot);
+} else {
+  loadEmbeddedSnapshot();
 }
 </script>
 </body>
