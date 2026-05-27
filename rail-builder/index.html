@@ -320,6 +320,7 @@
       </button>
       <div class="dropdown-menu" id="export-menu">
         <button data-export="png">🖼 PNG画像として保存</button>
+        <button data-export="html">📄 HTMLとして保存 <span style="color:#888;font-size:11px;">(オフラインで再表示可)</span></button>
         <button data-export="url">🔗 設定リンクをコピー</button>
       </div>
     </div>
@@ -377,6 +378,46 @@ const state = {
     console.warn('stations.json のロードでエラー:', e);
   }
 })();
+
+// === 自己完結HTML(exportHTML)で保存されたファイルが開かれた時の自動復元 ===
+// DOM に <script id="rb-snapshot"> があれば、そこから state を復元して
+// マップ画面まで自動遷移する。
+function loadEmbeddedSnapshot() {
+  const el = document.getElementById('rb-snapshot');
+  if (!el) return false;
+  try {
+    const snap = JSON.parse(el.textContent);
+    state.csv = snap.csv;
+    state.mapping = snap.mapping;
+    state.mode = snap.mode || 'heat';
+    state.selectedKws = snap.selectedKws || [];
+    state.diffCols = snap.diffCols || { a: null, b: null };
+    state.minFilter = snap.minFilter || 0;
+    if (snap.atlas) state.atlas = snap.atlas;
+    if (snap.stations) state.stations = snap.stations;
+    // 画面遷移
+    document.getElementById('upload-screen').style.display = 'none';
+    document.getElementById('mapping-screen').style.display = 'none';
+    document.getElementById('map-screen').style.display = 'block';
+    if (snap.title) document.getElementById('map-title').value = snap.title;
+    // 地図の初期化と描画
+    initMap();
+    buildControlPanel();
+    restyle();
+    updateStatusBar();
+    console.log('[snapshot] 自己完結HTMLから状態を復元');
+    return true;
+  } catch (e) {
+    console.error('[snapshot] 復元失敗:', e);
+    return false;
+  }
+}
+// DOMContentLoaded で snapshot があれば自動復元
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', loadEmbeddedSnapshot);
+} else {
+  loadEmbeddedSnapshot();
+}
 
 // ============================================================
 // CSV パース
@@ -1071,6 +1112,7 @@ document.addEventListener('click', e => {
     document.getElementById('export-menu').classList.remove('open');
     const kind = itemBtn.dataset.export;
     if (kind === 'png') exportPNG();
+    else if (kind === 'html') exportHTML();
     else if (kind === 'url') shareURL();
     return;
   }
@@ -1182,6 +1224,63 @@ function exportPNG() {
       link.click();
     })
     .catch(e => { hideLoading(); alert('PNG生成失敗: ' + e); });
+}
+
+// 現在のデータ(CSV/state/Atlas/stations)を埋め込んだ自己完結HTMLをダウンロード
+// 開いた時はマップ画面が自動で表示される
+function exportHTML() {
+  if (!state.csv || !state.mapping) {
+    alert('まずCSVを読み込んでマップを生成してください');
+    return;
+  }
+  showLoading('HTML生成中...');
+  try {
+    // 現在のページHTMLを取得 (DOCTYPE 付き)
+    const doctype = '<!DOCTYPE html>\n';
+    const html = document.documentElement.outerHTML;
+
+    // 埋め込むデータ (自己完結用のスナップショット)
+    const snapshot = {
+      csv: state.csv,
+      mapping: state.mapping,
+      mode: state.mode,
+      selectedKws: state.selectedKws,
+      diffCols: state.diffCols,
+      minFilter: state.minFilter,
+      title: document.getElementById('map-title').value,
+      // atlas/stations は使う方だけ含めればよい
+      atlas: state.mapping.dataType === 'line' ? state.atlas : null,
+      stations: state.mapping.dataType === 'station' ? state.stations : null,
+    };
+    const snapshotJSON = JSON.stringify(snapshot);
+
+    // <head>の末尾に snapshot 用の <script>を挿入
+    // ローダー本体は本体スクリプト側 (loadEmbeddedSnapshot) に組み込み済み
+    const snapshotScript =
+      '<script id="rb-snapshot" type="application/json">' +
+      snapshotJSON.replace(/<\/script>/g, '<\\/script>') +
+      '<\/script>';
+
+    // 挿入位置: </head> の直前
+    let outputHTML = html.replace(/<\/head>/i, snapshotScript + '\n</head>');
+
+    // 完全な HTML を Blob化してダウンロード
+    const blob = new Blob([doctype + outputHTML], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const titleSlug = (document.getElementById('map-title').value || 'rail_map')
+      .replace(/[^a-zA-Z0-9一-龯ぁ-んァ-ヶー]/g, '_').slice(0, 40);
+    link.download = `${titleSlug}_${dateStr}.html`;
+    link.href = url;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    hideLoading();
+  } catch(e) {
+    hideLoading();
+    alert('HTML保存失敗: ' + e.message);
+    console.error(e);
+  }
 }
 
 // ============================================================
