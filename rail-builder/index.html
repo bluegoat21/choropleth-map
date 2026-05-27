@@ -381,6 +381,24 @@ const state = {
   }
 })();
 
+// ページロード時に Atlas (路線GeoJSON) もプリロード
+// 1MBあるが起動時にロードしてしまうことで、マッピング画面で路線コード一致件数を即表示できる
+(async () => {
+  try {
+    const resp = await fetch(ATLAS_LINES_URL);
+    if (resp.ok) {
+      state.atlas = await resp.json();
+      console.log('[atlas]', state.atlas.features.length, '路線マスタロード完了');
+      // マッピング画面が既に開いていれば一致件数を更新
+      if (state.csv) updateLineMatchInfo();
+    } else {
+      console.warn('japan-rail-lines.geojson のロードに失敗。路線データモードは使用できません。');
+    }
+  } catch (e) {
+    console.warn('Atlas のロードでエラー:', e);
+  }
+})();
+
 // === 自己完結HTML(exportHTML)で保存されたファイルが開かれた時の自動復元 ===
 // DOM に <script id="rb-snapshot"> があれば、そこから state を復元して
 // マップ画面まで自動遷移する。
