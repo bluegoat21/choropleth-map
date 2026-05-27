@@ -420,6 +420,14 @@ function loadEmbeddedSnapshot() {
     document.getElementById('mapping-screen').style.display = 'none';
     document.getElementById('map-screen').style.display = 'block';
     if (snap.title) document.getElementById('map-title').value = snap.title;
+    // 共有HTMLは閲覧専用にする: ヘッダー(ホーム/最初に戻る)と保存・共有ボタンを隠す
+    const header = document.querySelector('.app-header');
+    if (header) header.style.display = 'none';
+    const exportFloat = document.getElementById('export-floating');
+    if (exportFloat) exportFloat.style.display = 'none';
+    // ヘッダー分の高さ(50px)を回収してmap を 100vh に
+    const mapEl = document.getElementById('map');
+    if (mapEl) mapEl.style.height = '100vh';
     // loading 表示が残っていれば消す (保存時のスナップショットで残ってしまった場合の保険)
     const loadingEl = document.getElementById('loading');
     if (loadingEl) loadingEl.classList.add('hide');

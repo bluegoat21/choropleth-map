@@ -1056,6 +1056,14 @@ function loadEmbeddedSnapshot() {
       const t = document.getElementById('map-title');
       if (t) t.value = snap.title;
     }
+    // 共有HTMLは閲覧専用にする: ヘッダー(最初に戻る)と保存・共有ボタンを隠す
+    const header = document.querySelector('.app-header');
+    if (header) header.style.display = 'none';
+    const exportFloat = document.getElementById('export-floating');
+    if (exportFloat) exportFloat.style.display = 'none';
+    // ヘッダー分の高さ(50px)を回収してmap を 100vh に
+    const mapEl = document.getElementById('map');
+    if (mapEl) mapEl.style.height = '100vh';
     // loading残留対策
     const loadingEl = document.getElementById('loading');
     if (loadingEl) loadingEl.classList.add('hide');
