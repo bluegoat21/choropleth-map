@@ -240,6 +240,7 @@
     <div class="upload-actions">
       <a class="btn" href="sample-stations.csv" download>📥 駅サンプルCSV</a>
       <a class="btn" href="sample-lines.csv" download>📥 路線サンプルCSV</a>
+      <a class="btn" href="lines-list.csv" download>📋 路線コード一覧 (597路線)</a>
     </div>
     <div class="csv-spec">
       <h3>📋 CSVフォーマット仕様</h3>
@@ -262,8 +263,9 @@
           <tr><td>数値列 (1個以上)</td><td>任意のキーワード列</td></tr>
         </table>
         <div style="margin-top:8px; color:#666; font-size:11px;">
-          ※ 路線コードは「japan-rail-lines.geojson」に収録された597路線(国土数値情報N02、事業者×路線名で集約)から自動でJOIN。
+          ※ 路線コードは597路線(国土数値情報N02、事業者×路線名で集約)から自動でJOIN。
           同名「本線」も事業者ごとに別コード(L0329=京成本線、L0337=阪神本線 など)。
+          コード一覧は <a href="lines-list.csv" download style="color:#3b82f6;">📋 lines-list.csv</a> をダウンロードして参照。
         </div>
       </div>
     </div>

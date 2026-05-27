@@ -9,11 +9,12 @@ sumai_surfin_keyword_map.html
 sumai_surfin_rail_map.html
 
 # ===== 実調査CSV (機密性) =====
-# 注: builder/sample.csv, rail-builder/sample-*.csv は除外しない (公開してOK)
+# 注: builder/sample.csv, rail-builder/sample-*.csv, lines-list.csv は除外しない (公開してOK)
 *.csv
 !builder/sample.csv
 !rail-builder/sample-stations.csv
 !rail-builder/sample-lines.csv
+!rail-builder/lines-list.csv
 
 # ===== 路線図プロジェクト (別プロジェクトで管理) =====
 # 別チャットで進行中のため、こちらでは追跡しない
