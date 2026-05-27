@@ -1236,12 +1236,18 @@ function exportHTML() {
     return;
   }
   showLoading('HTML生成中...');
+  // ローディングUIを描画させてから処理を始める (同期処理ブロック対策)
+  // setTimeout で確実に次のイベントループへ
+  setTimeout(doExportHTML, 50);
+}
+function doExportHTML() {
+  const tStart = performance.now();
+  console.log('[exportHTML] start');
   try {
-    // 現在のページHTMLを取得 (DOCTYPE 付き)
     const doctype = '<!DOCTYPE html>\n';
     const html = document.documentElement.outerHTML;
+    console.log('[exportHTML] outerHTML:', html.length, 'bytes,', Math.round(performance.now() - tStart), 'ms');
 
-    // 埋め込むデータ (自己完結用のスナップショット)
     const snapshot = {
       csv: state.csv,
       mapping: state.mapping,
@@ -1250,38 +1256,45 @@ function exportHTML() {
       diffCols: state.diffCols,
       minFilter: state.minFilter,
       title: document.getElementById('map-title').value,
-      // atlas/stations は使う方だけ含めればよい
       atlas: state.mapping.dataType === 'line' ? state.atlas : null,
       stations: state.mapping.dataType === 'station' ? state.stations : null,
     };
     const snapshotJSON = JSON.stringify(snapshot);
+    console.log('[exportHTML] snapshot JSON:', snapshotJSON.length, 'bytes,', Math.round(performance.now() - tStart), 'ms');
 
-    // <head>の末尾に snapshot 用の <script>を挿入
-    // ローダー本体は本体スクリプト側 (loadEmbeddedSnapshot) に組み込み済み
     const snapshotScript =
       '<script id="rb-snapshot" type="application/json">' +
       snapshotJSON.replace(/<\/script>/g, '<\\/script>') +
       '<\/script>';
+    const outputHTML = html.replace(/<\/head>/i, snapshotScript + '\n</head>');
+    console.log('[exportHTML] final HTML:', outputHTML.length, 'bytes,', Math.round(performance.now() - tStart), 'ms');
 
-    // 挿入位置: </head> の直前
-    let outputHTML = html.replace(/<\/head>/i, snapshotScript + '\n</head>');
-
-    // 完全な HTML を Blob化してダウンロード
     const blob = new Blob([doctype + outputHTML], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
     const dateStr = new Date().toISOString().slice(0, 10);
     const titleSlug = (document.getElementById('map-title').value || 'rail_map')
       .replace(/[^a-zA-Z0-9一-龯ぁ-んァ-ヶー]/g, '_').slice(0, 40);
-    link.download = `${titleSlug}_${dateStr}.html`;
+    const filename = `${titleSlug}_${dateStr}.html`;
+
+    // ダウンロードを発火 (DOMにアタッチしてからclickすると一部ブラウザで安定)
+    const link = document.createElement('a');
+    link.download = filename;
     link.href = url;
+    link.style.display = 'none';
+    document.body.appendChild(link);
     link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    hideLoading();
+    setTimeout(() => {
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }, 1500);
+    console.log('[exportHTML] download triggered:', filename, 'blob:', (blob.size / 1048576).toFixed(2), 'MB');
+    console.log('[exportHTML] total:', Math.round(performance.now() - tStart), 'ms');
   } catch(e) {
+    console.error('[exportHTML] error:', e);
+    alert('HTML保存失敗: ' + e.message + '\nブラウザのコンソール(F12) を確認してください');
+  } finally {
+    // 確実にloadingを消す
     hideLoading();
-    alert('HTML保存失敗: ' + e.message);
-    console.error(e);
   }
 }
 
