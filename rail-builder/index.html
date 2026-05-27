@@ -249,12 +249,12 @@
       </div>
       <div class="tab-content" data-tab-content="station">
         <table>
-          <tr><td class="req">緯度 <span style="color:#dc2626">*必須</span></td><td>例: 35.681 (10進数)</td></tr>
-          <tr><td class="req">経度 <span style="color:#dc2626">*必須</span></td><td>例: 139.7671</td></tr>
-          <tr><td>駅名 <span style="color:#888">(任意)</span></td><td>例: 東京、新宿。表示用</td></tr>
-          <tr><td>事業者・路線名 <span style="color:#888">(任意)</span></td><td>同名駅の区別、ツールチップ表示</td></tr>
+          <tr><td class="req">駅コード <span style="color:#dc2626">*必須</span></td><td>例: S03540 (Sから始まる5〜6桁)。 駅名・緯度経度は内部マスタから自動解決</td></tr>
           <tr><td>数値列 (1個以上)</td><td>任意のキーワード列。例: 検索Vol_A, 妊活, ...</td></tr>
         </table>
+        <div style="margin-top:8px; color:#666; font-size:11px;">
+          ※ 駅コードは「stations.json」に収録された6,658駅(全国主要事業者)から自動でJOIN。駅コード一覧は <code>stations.json</code> 参照。
+        </div>
       </div>
       <div class="tab-content" data-tab-content="line" style="display:none">
         <table>
@@ -283,17 +283,10 @@
 
       <div id="station-mapping">
         <div class="mapping-row">
-          <label>緯度列:</label>
-          <select id="map-lat"></select>
+          <label>駅コード列:</label>
+          <select id="map-station-code"></select>
         </div>
-        <div class="mapping-row">
-          <label>経度列:</label>
-          <select id="map-lng"></select>
-        </div>
-        <div class="mapping-row">
-          <label>駅名列 (任意):</label>
-          <select id="map-station-name"><option value="">(なし)</option></select>
-        </div>
+        <div id="station-match-info" style="font-size:11px;color:#666;margin-top:4px;"></div>
       </div>
 
       <div id="line-mapping" style="display:none">
@@ -353,17 +346,34 @@
 // ============================================================
 
 const ATLAS_LINES_URL = 'japan-rail-lines.geojson';
+const STATIONS_URL = 'stations.json';
 
 const state = {
   csv: null,
   mapping: null,         // { dataType: 'station'|'line', ... }
   atlas: null,           // 路線GeoJSON (lazy load)
+  stations: null,        // 駅コード→{n, lat, lng, lines, op} (起動時preload)
   features: null,        // 描画用の整形済みデータ
   map: null,
   layer: null,
   selectedKws: [],
   minFilter: 0,
 };
+
+// ページロード時に stations.json をプリロード (駅コード→緯度経度マスタ)
+(async () => {
+  try {
+    const resp = await fetch(STATIONS_URL);
+    if (resp.ok) {
+      state.stations = await resp.json();
+      console.log('[stations]', Object.keys(state.stations).length, '駅マスタロード完了');
+    } else {
+      console.warn('stations.json のロードに失敗。駅データモードは使用できません。');
+    }
+  } catch (e) {
+    console.warn('stations.json のロードでエラー:', e);
+  }
+})();
 
 // ============================================================
 // CSV パース
@@ -424,10 +434,18 @@ function showMapping() {
   document.getElementById('csv-summary').textContent =
     `読み込み: ${rows.length}行 × ${fields.length}列`;
 
-  // 緯度・経度列を自動検出 (駅判定)
-  const latCol = fields.find(f => /緯度|lat(itude)?|Y/i.test(f));
-  const lngCol = fields.find(f => /経度|lng|lon(gitude)?|X/i.test(f));
-  const detectedType = (latCol && lngCol) ? 'station' : 'line';
+  // 駅コード列を自動検出 (列名または値パターンで判定)
+  // 値パターン: S00001 などの "S+数字" 形式が一定数あれば駅コード列とみなす
+  const isStationCodeValue = v => typeof v === 'string' && /^S\d{4,6}$/.test(v.trim());
+  const codeColByName = fields.find(f => /駅コード|station.?code|stn.?code|code.?eki/i.test(f));
+  const codeColByValue = !codeColByName && fields.find(f => {
+    const sample = rows.slice(0, 20).map(r => r[f]).filter(v => v != null && v !== '');
+    return sample.length > 0 && sample.filter(isStationCodeValue).length / sample.length > 0.7;
+  });
+  const stationCodeCol = codeColByName || codeColByValue;
+
+  // データ種別の初期判定: 駅コード列があれば駅データ、なければ路線データ
+  const detectedType = stationCodeCol ? 'station' : 'line';
 
   // データ種別ラジオを初期化
   const modeLabels = document.querySelectorAll('#data-mode-toggle label');
@@ -448,6 +466,7 @@ function showMapping() {
       document.getElementById('station-mapping').style.display = v === 'station' ? '' : 'none';
       document.getElementById('line-mapping').style.display = v === 'line' ? '' : 'none';
       rebuildKeywordList();
+      updateStationMatchInfo();
     });
   });
 
@@ -455,14 +474,9 @@ function showMapping() {
     sel.innerHTML = opts.map(o => `<option value="${o.value}" ${o.value === selected ? 'selected' : ''}>${o.label}</option>`).join('');
   };
 
-  // 駅マッピング
-  fillSelect(document.getElementById('map-lat'),
-    fields.map(f => ({ value: f, label: f })), latCol || fields[0]);
-  fillSelect(document.getElementById('map-lng'),
-    fields.map(f => ({ value: f, label: f })), lngCol || fields[1]);
-  const stationNameCol = fields.find(f => /駅名|station.?name|name/i.test(f)) || '';
-  fillSelect(document.getElementById('map-station-name'),
-    [{ value: '', label: '(なし)' }, ...fields.map(f => ({ value: f, label: f }))], stationNameCol);
+  // 駅データマッピング: 駅コード列のみ
+  fillSelect(document.getElementById('map-station-code'),
+    fields.map(f => ({ value: f, label: f })), stationCodeCol || fields[0]);
 
   // 路線マッピング
   const lineNameCol = fields.find(f => /路線名|line.?name|name/i.test(f)) || fields[0];
@@ -470,6 +484,35 @@ function showMapping() {
     fields.map(f => ({ value: f, label: f })), lineNameCol);
 
   rebuildKeywordList();
+  updateStationMatchInfo();
+}
+
+// 駅コード列を見て、stations.json とJOINできる行数を表示
+function updateStationMatchInfo() {
+  const info = document.getElementById('station-match-info');
+  if (!info) return;
+  const dataMode = document.querySelector('input[name="data-mode"]:checked').value;
+  if (dataMode !== 'station') { info.textContent = ''; return; }
+  if (!state.stations) {
+    info.innerHTML = '<span style="color:#c00;">⚠ stations.json が読み込まれていません</span>';
+    return;
+  }
+  const codeCol = document.getElementById('map-station-code').value;
+  const rows = state.csv.rows;
+  let matched = 0, unmatched = 0;
+  const unmatchedSamples = [];
+  rows.forEach(r => {
+    const code = String(r[codeCol] || '').trim();
+    if (!code) { unmatched++; if (unmatchedSamples.length < 3) unmatchedSamples.push('(空欄)'); return; }
+    if (state.stations[code]) matched++;
+    else { unmatched++; if (unmatchedSamples.length < 3) unmatchedSamples.push(code); }
+  });
+  const total = rows.length;
+  if (unmatched === 0) {
+    info.innerHTML = `<span style="color:#16a34a;">✓ ${matched}件すべての駅コードが一致しました</span>`;
+  } else {
+    info.innerHTML = `<span style="color:#c00;">⚠ ${unmatched}/${total}件の駅コードがマスタに見つかりません (例: ${unmatchedSamples.join(', ')}…)。これらの行は描画されません</span>`;
+  }
 }
 
 function rebuildKeywordList() {
@@ -477,9 +520,11 @@ function rebuildKeywordList() {
   const dataMode = document.querySelector('input[name="data-mode"]:checked').value;
   const excludeCols = new Set();
   if (dataMode === 'station') {
-    excludeCols.add(document.getElementById('map-lat').value);
-    excludeCols.add(document.getElementById('map-lng').value);
-    excludeCols.add(document.getElementById('map-station-name').value);
+    excludeCols.add(document.getElementById('map-station-code').value);
+    // 一般的な「駅名」列もキーワード候補から外す (駅名はstations.jsonから取得するため)
+    fields.forEach(f => {
+      if (/^(駅名|station.?name|stn.?name|name)$/i.test(f)) excludeCols.add(f);
+    });
   } else {
     excludeCols.add(document.getElementById('map-line-name').value);
   }
@@ -507,12 +552,13 @@ document.getElementById('go-render').onclick = async () => {
   const kwCols = Array.from(document.querySelectorAll('#map-keywords input:checked')).map(cb => cb.value);
   if (kwCols.length === 0) { alert('数値列を1つ以上選択してください'); return; }
   if (dataType === 'station') {
-    const latCol = document.getElementById('map-lat').value;
-    const lngCol = document.getElementById('map-lng').value;
-    if (!latCol || !lngCol) { alert('緯度・経度列を指定してください'); return; }
-    state.mapping = { dataType, latCol, lngCol,
-      nameCol: document.getElementById('map-station-name').value,
-      kwCols };
+    if (!state.stations) {
+      alert('駅マスタ (stations.json) が読み込まれていません。ページを再読み込みしてください。');
+      return;
+    }
+    const codeCol = document.getElementById('map-station-code').value;
+    if (!codeCol) { alert('駅コード列を指定してください'); return; }
+    state.mapping = { dataType, codeCol, kwCols };
   } else {
     const nameCol = document.getElementById('map-line-name').value;
     if (!nameCol) { alert('路線名列を指定してください'); return; }
@@ -523,9 +569,12 @@ document.getElementById('go-render').onclick = async () => {
 
 document.getElementById('link-reset').onclick = e => { e.preventDefault(); location.reload(); };
 
-// マッピング画面で列が変わった時のキーワードリスト再構築
-['map-lat','map-lng','map-station-name','map-line-name'].forEach(id => {
-  document.getElementById(id).addEventListener('change', rebuildKeywordList);
+// マッピング画面で列が変わった時のキーワードリスト再構築・駅一致情報の更新
+['map-station-code','map-line-name'].forEach(id => {
+  document.getElementById(id).addEventListener('change', () => {
+    rebuildKeywordList();
+    updateStationMatchInfo();
+  });
 });
 
 // ============================================================
@@ -561,18 +610,27 @@ function buildFeatures() {
   const { dataType, kwCols } = state.mapping;
   const features = [];
   if (dataType === 'station') {
-    const { latCol, lngCol, nameCol } = state.mapping;
+    const { codeCol } = state.mapping;
+    const unmatched = [];
     state.csv.rows.forEach((row, i) => {
-      const lat = parseFloat(row[latCol]);
-      const lng = parseFloat(row[lngCol]);
-      if (isNaN(lat) || isNaN(lng)) return;
+      const code = String(row[codeCol] || '').trim();
+      if (!code) return;
+      const stn = state.stations[code];
+      if (!stn) { unmatched.push(code); return; }
       const props = {
         _id: 's' + i,
-        _name: nameCol ? (row[nameCol] || '') : '',
+        _code: code,
+        _name: stn.n,
+        _lines: stn.lines || '',
+        _operator: stn.op || '',
       };
       kwCols.forEach(kw => { props['v_' + kw] = parseFloat(row[kw]) || 0; });
-      features.push({ type: 'station', lat, lng, properties: props });
+      features.push({ type: 'station', lat: stn.lat, lng: stn.lng, properties: props });
     });
+    if (unmatched.length > 0) {
+      console.warn('[unmatched stations]', unmatched.length, '件', unmatched.slice(0, 10));
+    }
+    state._unmatched = unmatched;
   } else {
     const { nameCol } = state.mapping;
     // CSVを 路線名 → row のmapに (路線名のみで照合)
@@ -686,8 +744,14 @@ function restyle() {
 }
 
 function buildTooltip(p, totalVal) {
-  let html = `<div style="font-weight:600;margin-bottom:4px;">${escape(p._name || '(無名)')}</div>`;
-  if (p._operator) html += `<div style="color:#666;font-size:11px;">${escape(p._operator)}</div>`;
+  let html = `<div style="font-weight:600;margin-bottom:4px;">${escape(p._name || '(無名)')}`;
+  if (p._code) html += ` <span style="color:#888;font-size:11px;font-weight:400;">[${escape(p._code)}]</span>`;
+  html += '</div>';
+  if (p._operator) html += `<div style="color:#666;font-size:11px;">${escape(p._operator.replace(/\|/g, ' / '))}</div>`;
+  if (p._lines) {
+    const lineList = p._lines.split('|').slice(0, 6).join(', ');
+    html += `<div style="color:#666;font-size:11px;">${escape(lineList)}</div>`;
+  }
   html += '<table style="font-size:11px;margin-top:4px;border-collapse:collapse;">';
   state.mapping.kwCols.forEach(kw => {
     const v = p['v_' + kw] || 0;
