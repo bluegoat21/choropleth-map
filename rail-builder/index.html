@@ -356,7 +356,9 @@ const state = {
   features: null,        // 描画用の整形済みデータ
   map: null,
   layer: null,
+  mode: 'heat',          // 'heat' (ヒートマップ) | 'diff' (差分マップ)
   selectedKws: [],
+  diffCols: { a: null, b: null },  // 差分マップ: 赤(a) vs 青(b)
   minFilter: 0,
 };
 
@@ -599,6 +601,11 @@ async function renderMap() {
   document.getElementById('mapping-screen').style.display = 'none';
   document.getElementById('map-screen').style.display = 'block';
   state.selectedKws = [state.mapping.kwCols[0]];
+  // 差分マップ用の2列を初期化 (最初の2列を選択)
+  state.diffCols = {
+    a: state.mapping.kwCols[0],
+    b: state.mapping.kwCols[1] || state.mapping.kwCols[0],
+  };
   initMap();
   buildControlPanel();
   applyURLParams();
@@ -671,6 +678,15 @@ function initMap() {
 
 function drawLayers() {
   state.layer.clearLayers();
+
+  if (state.mode === 'diff') {
+    drawLayersDiff();
+  } else {
+    drawLayersHeat();
+  }
+}
+
+function drawLayersHeat() {
   const sums = computeSums();
   let maxV = 1;
   state.features.forEach(f => {
@@ -701,7 +717,43 @@ function drawLayers() {
     }
   });
   // 凡例も更新
-  updateLegend(maxV);
+  updateLegendHeat(maxV);
+}
+
+function drawLayersDiff() {
+  const scores = computeDiffScores();
+  // 差分モードでもサイズは「2列合計」でスケール (どちらが優勢かと、規模の両方を表現)
+  let maxTotal = 1;
+  state.features.forEach(f => {
+    const t = (f.properties['v_' + state.diffCols.a] || 0)
+            + (f.properties['v_' + state.diffCols.b] || 0);
+    if (t > maxTotal) maxTotal = t;
+  });
+  state.features.forEach(f => {
+    const total = (f.properties['v_' + state.diffCols.a] || 0)
+                + (f.properties['v_' + state.diffCols.b] || 0);
+    const score = scores[f.properties._id];
+    const filtered = total < state.minFilter || score == null;
+    if (f.type === 'station') {
+      const r = filtered ? 2 : scaleRadius(total, maxTotal);
+      const color = filtered ? '#ddd' : colorDiff(score);
+      const m = L.circleMarker([f.lat, f.lng], {
+        radius: r, fillColor: color, color: filtered ? '#bbb' : '#333',
+        weight: 0.6, fillOpacity: filtered ? 0.2 : 0.85,
+      });
+      m.bindTooltip(buildTooltipDiff(f.properties, score, total), { sticky: false });
+      state.layer.addLayer(m);
+    } else if (f.type === 'line') {
+      const w = filtered ? 0.6 : scaleWidth(total, maxTotal);
+      const color = filtered ? '#ddd' : colorDiff(score);
+      const layer = L.geoJSON(f.geometry, {
+        style: { color, weight: w, opacity: filtered ? 0.3 : 0.9 },
+      });
+      layer.bindTooltip(buildTooltipDiff(f.properties, score, total), { sticky: false });
+      state.layer.addLayer(layer);
+    }
+  });
+  updateLegendDiff();
 }
 
 function scaleRadius(v, maxV) {
@@ -721,6 +773,24 @@ function colorHeat(value, maxValue) {
   const b = Math.round(249 - (249 - 113) * t);
   return `rgb(${r},${g},${b})`;
 }
+// 差分スコア -1〜+1 を 赤(A優勢) → 白(拮抗) → 青(B優勢) のグラデに
+function colorDiff(score) {
+  if (score == null) return '#cccccc';
+  const t = (score + 1) / 2;
+  let r, g, b;
+  if (t < 0.5) {
+    const k = t / 0.5;
+    r = Math.round(215 + (247 - 215) * k);
+    g = Math.round(48 + (247 - 48) * k);
+    b = Math.round(39 + (247 - 39) * k);
+  } else {
+    const k = (t - 0.5) / 0.5;
+    r = Math.round(247 + (33 - 247) * k);
+    g = Math.round(247 + (102 - 247) * k);
+    b = Math.round(247 + (172 - 247) * k);
+  }
+  return `rgb(${r},${g},${b})`;
+}
 
 function computeSums() {
   const sums = {};
@@ -731,6 +801,18 @@ function computeSums() {
   });
   return sums;
 }
+// 差分スコア: (B - A) / (A + B) を各フィーチャごとに算出。両列とも0なら null
+function computeDiffScores() {
+  const { a, b } = state.diffCols;
+  const scores = {};
+  state.features.forEach(f => {
+    const va = f.properties['v_' + a] || 0;
+    const vb = f.properties['v_' + b] || 0;
+    if (va + vb < 1) { scores[f.properties._id] = null; return; }
+    scores[f.properties._id] = (vb - va) / (va + vb);
+  });
+  return scores;
+}
 function passesFilter(p) {
   let s = 0;
   state.selectedKws.forEach(kw => s += (p['v_' + kw] || 0));
@@ -740,10 +822,20 @@ function passesFilter(p) {
 function restyle() {
   if (!state.layer) return;
   drawLayers();
+  updateDiffFormula();
   updateURLParams();
 }
+// 差分マップの公式表示を更新 (パネル内)
+function updateDiffFormula() {
+  const el = document.getElementById('diff-formula');
+  if (!el) return;
+  const { a, b } = state.diffCols;
+  el.innerHTML =
+    `スコア = (<b style="color:#2166ac;">${escape(b)}</b> − <b style="color:#d73027;">${escape(a)}</b>) / ` +
+    `(<b style="color:#d73027;">${escape(a)}</b> + <b style="color:#2166ac;">${escape(b)}</b>)`;
+}
 
-function buildTooltip(p, totalVal) {
+function tooltipHeader(p) {
   let html = `<div style="font-weight:600;margin-bottom:4px;">${escape(p._name || '(無名)')}`;
   if (p._code) html += ` <span style="color:#888;font-size:11px;font-weight:400;">[${escape(p._code)}]</span>`;
   html += '</div>';
@@ -752,6 +844,10 @@ function buildTooltip(p, totalVal) {
     const lineList = p._lines.split('|').slice(0, 6).join(', ');
     html += `<div style="color:#666;font-size:11px;">${escape(lineList)}</div>`;
   }
+  return html;
+}
+function buildTooltip(p, totalVal) {
+  let html = tooltipHeader(p);
   html += '<table style="font-size:11px;margin-top:4px;border-collapse:collapse;">';
   state.mapping.kwCols.forEach(kw => {
     const v = p['v_' + kw] || 0;
@@ -759,6 +855,27 @@ function buildTooltip(p, totalVal) {
     html += `<tr${isSelected?' style="font-weight:600;"':''}><td style="padding-right:8px;">${escape(kw)}:</td><td style="text-align:right;">${v.toLocaleString()}</td></tr>`;
   });
   html += `<tr style="border-top:1px solid #ddd;"><td style="padding-right:8px;font-weight:600;">選択合計:</td><td style="text-align:right;">${totalVal.toLocaleString()}</td></tr>`;
+  html += '</table>';
+  return html;
+}
+function buildTooltipDiff(p, score, total) {
+  const { a, b } = state.diffCols;
+  const va = p['v_' + a] || 0;
+  const vb = p['v_' + b] || 0;
+  let html = tooltipHeader(p);
+  html += '<table style="font-size:11px;margin-top:4px;border-collapse:collapse;">';
+  html += `<tr><td style="padding-right:8px;color:#d73027;">${escape(a)} (赤):</td><td style="text-align:right;"><b>${va.toLocaleString()}</b></td></tr>`;
+  html += `<tr><td style="padding-right:8px;color:#2166ac;">${escape(b)} (青):</td><td style="text-align:right;"><b>${vb.toLocaleString()}</b></td></tr>`;
+  html += `<tr style="border-top:1px solid #ddd;"><td style="padding-right:8px;">合計:</td><td style="text-align:right;">${total.toLocaleString()}</td></tr>`;
+  if (score == null) {
+    html += `<tr><td colspan="2" style="padding-top:4px;color:#888;text-align:center;">データなし</td></tr>`;
+  } else {
+    const label = score > 0.1 ? `${escape(b)} 優勢` : score < -0.1 ? `${escape(a)} 優勢` : '拮抗';
+    const swatchColor = colorDiff(score);
+    html += `<tr><td style="padding-right:8px;">差分スコア:</td><td style="text-align:right;"><b>${score.toFixed(3)}</b> ` +
+            `<span style="display:inline-block;width:10px;height:10px;background:${swatchColor};border:1px solid #999;vertical-align:middle;"></span></td></tr>`;
+    html += `<tr><td style="padding-right:8px;">判定:</td><td style="text-align:right;"><b>${label}</b></td></tr>`;
+  }
   html += '</table>';
   return html;
 }
@@ -772,6 +889,7 @@ function escape(s) {
 function buildControlPanel() {
   const panel = document.getElementById('control-panel');
   const kws = state.mapping.kwCols;
+  const kwOptions = kws.map(k => `<option value="${escape(k)}">${escape(k)}</option>`).join('');
   panel.innerHTML = `
     <div class="panel-header">
       <div class="panel-title">設定</div>
@@ -783,10 +901,19 @@ function buildControlPanel() {
       <div style="font-size:11px;color:#666;">${state.mapping.dataType === 'station' ? '🚉 駅 (比例シンボル)' : '🛤️ 路線 (ライン太さ)'}</div>
     </div>
     <div class="section">
+      <h4>表示モード</h4>
+      <label style="display:block;padding:2px 0;font-size:12px;cursor:pointer;">
+        <input type="radio" name="mode" value="heat" ${state.mode === 'heat' ? 'checked' : ''}> ヒートマップ
+      </label>
+      <label style="display:block;padding:2px 0;font-size:12px;cursor:pointer;">
+        <input type="radio" name="mode" value="diff" ${state.mode === 'diff' ? 'checked' : ''}> 差分マップ (2列比較)
+      </label>
+    </div>
+    <div class="section">
       <h4>最小値フィルタ</h4>
       <input type="number" id="vol-filter" min="0" step="100" value="0"> 以上を表示
     </div>
-    <div class="section">
+    <div class="section" id="heat-section" style="display:${state.mode === 'heat' ? 'block' : 'none'};">
       <h4>キーワード</h4>
       <div style="margin-bottom:6px;">
         <button class="pill" data-action="kw-all">全選択</button>
@@ -802,6 +929,18 @@ function buildControlPanel() {
         </div>
       </div>
     </div>
+    <div class="section" id="diff-section" style="display:${state.mode === 'diff' ? 'block' : 'none'};">
+      <h4>差分マップの2列</h4>
+      <div style="margin-bottom:6px;">
+        <label style="display:block;font-size:11px;color:#d73027;font-weight:600;margin-bottom:2px;">A (赤・マイナス側)</label>
+        <select id="diff-a" style="width:100%;">${kws.map(k => `<option value="${escape(k)}" ${k === state.diffCols.a ? 'selected' : ''}>${escape(k)}</option>`).join('')}</select>
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;color:#2166ac;font-weight:600;margin-bottom:2px;">B (青・プラス側)</label>
+        <select id="diff-b" style="width:100%;">${kws.map(k => `<option value="${escape(k)}" ${k === state.diffCols.b ? 'selected' : ''}>${escape(k)}</option>`).join('')}</select>
+      </div>
+      <div id="diff-formula" style="margin-top:6px;padding:6px 8px;background:#f5f5f5;border-radius:4px;font-size:10px;color:#444;line-height:1.5;"></div>
+    </div>
     </div>
   `;
 
@@ -814,6 +953,19 @@ function buildControlPanel() {
       restyle();
     } else if (e.target.id === 'vol-filter') {
       state.minFilter = parseInt(e.target.value, 10) || 0;
+      restyle();
+    } else if (e.target.name === 'mode') {
+      state.mode = e.target.value;
+      const heatSec = document.getElementById('heat-section');
+      const diffSec = document.getElementById('diff-section');
+      if (heatSec) heatSec.style.display = state.mode === 'heat' ? 'block' : 'none';
+      if (diffSec) diffSec.style.display = state.mode === 'diff' ? 'block' : 'none';
+      restyle();
+    } else if (e.target.id === 'diff-a') {
+      state.diffCols.a = e.target.value;
+      restyle();
+    } else if (e.target.id === 'diff-b') {
+      state.diffCols.b = e.target.value;
       restyle();
     }
   });
@@ -874,7 +1026,7 @@ document.addEventListener('click', e => {
 // ============================================================
 // 凡例
 // ============================================================
-function updateLegend(maxV) {
+function updateLegendHeat(maxV) {
   const kws = state.selectedKws;
   const label = kws.length === 0 ? '(未選択)'
               : kws.length > 3 ? `${kws.length}キーワード合算` : kws.join(' + ');
@@ -885,6 +1037,29 @@ function updateLegend(maxV) {
     <div style="width:220px;height:14px;background:linear-gradient(to right,#f7f4f9,#3f0071);border:1px solid #999;"></div>
     <div style="display:flex;justify-content:space-between;width:220px;margin-top:2px;font-size:11px;">
       <span>0</span><span>${maxV.toLocaleString()} (最大)</span>
+    </div>`;
+}
+function updateLegendDiff() {
+  const { a, b } = state.diffCols;
+  const typeLabel = state.mapping.dataType === 'station' ? '駅' : '路線';
+  document.getElementById('legend-content').innerHTML = `
+    <div style="font-weight:600;margin-bottom:6px;">差分マップ ${typeLabel}</div>
+    <div style="font-size:11px;color:#444;margin-bottom:6px;">
+      <span style="color:#d73027;font-weight:600;">${escape(a)}</span> vs
+      <span style="color:#2166ac;font-weight:600;">${escape(b)}</span>
+    </div>
+    <div style="width:220px;height:14px;background:linear-gradient(to right,#d73027,#f7f7f7,#2166ac);border:1px solid #999;"></div>
+    <div style="display:flex;justify-content:space-between;width:220px;margin-top:2px;font-size:11px;">
+      <span style="color:#d73027;">${escape(a)} 優勢</span>
+      <span>拮抗</span>
+      <span style="color:#2166ac;">${escape(b)} 優勢</span>
+    </div>
+    <div style="margin-top:8px;font-size:10px;color:#666;">
+      <div style="display:inline-block;width:10px;height:10px;background:#cccccc;border:1px solid #999;vertical-align:middle;margin-right:3px;"></div>
+      データなし (両列とも0)
+    </div>
+    <div style="margin-top:6px;font-size:10px;color:#888;">
+      スコア = (B − A) / (A + B)、サイズは合計値に比例
     </div>`;
 }
 
@@ -900,7 +1075,13 @@ function updateStatusBar() {
 function updateURLParams() {
   const p = new URLSearchParams();
   p.set('type', state.mapping.dataType);
-  p.set('kw', state.selectedKws.join(','));
+  p.set('mode', state.mode);
+  if (state.mode === 'heat') {
+    p.set('kw', state.selectedKws.join(','));
+  } else {
+    p.set('a', state.diffCols.a || '');
+    p.set('b', state.diffCols.b || '');
+  }
   if (state.minFilter > 0) p.set('filter', state.minFilter);
   const title = document.getElementById('map-title').value;
   if (title) p.set('title', title);
@@ -908,10 +1089,19 @@ function updateURLParams() {
 }
 function applyURLParams() {
   const p = new URLSearchParams(location.search);
+  if (p.get('mode') === 'diff' || p.get('mode') === 'heat') state.mode = p.get('mode');
   if (p.get('kw')) state.selectedKws = p.get('kw').split(',').filter(k => state.mapping.kwCols.includes(k));
+  if (p.get('a') && state.mapping.kwCols.includes(p.get('a'))) state.diffCols.a = p.get('a');
+  if (p.get('b') && state.mapping.kwCols.includes(p.get('b'))) state.diffCols.b = p.get('b');
   if (p.get('filter')) state.minFilter = parseInt(p.get('filter'), 10) || 0;
   if (p.get('title')) document.getElementById('map-title').value = p.get('title');
   document.getElementById('vol-filter').value = state.minFilter;
+  // applyURLParamsはbuildControlPanel後に呼ばれるので、UIをstateに同期
+  document.querySelectorAll('input[name="mode"]').forEach(rb => rb.checked = rb.value === state.mode);
+  const heatSec = document.getElementById('heat-section');
+  const diffSec = document.getElementById('diff-section');
+  if (heatSec) heatSec.style.display = state.mode === 'heat' ? 'block' : 'none';
+  if (diffSec) diffSec.style.display = state.mode === 'diff' ? 'block' : 'none';
   syncKwChecks();
 }
 document.getElementById('map-title').addEventListener('input', updateURLParams);
