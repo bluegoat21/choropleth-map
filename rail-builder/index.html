@@ -258,12 +258,12 @@
       </div>
       <div class="tab-content" data-tab-content="line" style="display:none">
         <table>
-          <tr><td class="req">路線名 <span style="color:#dc2626">*必須</span></td><td>例: 山手線、丸ノ内線。Atlas との結合キー</td></tr>
-          <tr><td>事業者 <span style="color:#888">(任意)</span></td><td>同名路線(例:本町線)の区別</td></tr>
+          <tr><td class="req">路線コード <span style="color:#dc2626">*必須</span></td><td>例: L0001 (Lから始まる4桁)。路線名・事業者は内部マスタから自動解決</td></tr>
           <tr><td>数値列 (1個以上)</td><td>任意のキーワード列</td></tr>
         </table>
         <div style="margin-top:8px; color:#666; font-size:11px;">
-          ※ 路線データは国土数値情報N02を内蔵。事業者名は「JR東日本」「東京メトロ」など正式表記推奨。
+          ※ 路線コードは「japan-rail-lines.geojson」に収録された597路線(国土数値情報N02、事業者×路線名で集約)から自動でJOIN。
+          同名「本線」も事業者ごとに別コード(L0329=京成本線、L0337=阪神本線 など)。
         </div>
       </div>
     </div>
@@ -291,9 +291,10 @@
 
       <div id="line-mapping" style="display:none">
         <div class="mapping-row">
-          <label>路線名列:</label>
-          <select id="map-line-name"></select>
+          <label>路線コード列:</label>
+          <select id="map-line-code"></select>
         </div>
+        <div id="line-match-info" style="font-size:11px;color:#666;margin-top:4px;"></div>
       </div>
 
       <div style="margin-top: 16px; font-weight: 600; font-size: 13px;">使用する数値列(キーワード):</div>
@@ -439,15 +440,20 @@ function showMapping() {
   // 駅コード列を自動検出 (列名または値パターンで判定)
   // 値パターン: S00001 などの "S+数字" 形式が一定数あれば駅コード列とみなす
   const isStationCodeValue = v => typeof v === 'string' && /^S\d{4,6}$/.test(v.trim());
-  const codeColByName = fields.find(f => /駅コード|station.?code|stn.?code|code.?eki/i.test(f));
-  const codeColByValue = !codeColByName && fields.find(f => {
-    const sample = rows.slice(0, 20).map(r => r[f]).filter(v => v != null && v !== '');
-    return sample.length > 0 && sample.filter(isStationCodeValue).length / sample.length > 0.7;
-  });
-  const stationCodeCol = codeColByName || codeColByValue;
+  const isLineCodeValue = v => typeof v === 'string' && /^L\d{4}$/.test(v.trim());
+  const stationCodeCol = fields.find(f => /駅コード|station.?code|stn.?code/i.test(f))
+    || fields.find(f => {
+      const sample = rows.slice(0, 20).map(r => r[f]).filter(v => v != null && v !== '');
+      return sample.length > 0 && sample.filter(isStationCodeValue).length / sample.length > 0.7;
+    });
+  const lineCodeCol = fields.find(f => /路線コード|line.?code|rail.?code/i.test(f))
+    || fields.find(f => {
+      const sample = rows.slice(0, 20).map(r => r[f]).filter(v => v != null && v !== '');
+      return sample.length > 0 && sample.filter(isLineCodeValue).length / sample.length > 0.7;
+    });
 
-  // データ種別の初期判定: 駅コード列があれば駅データ、なければ路線データ
-  const detectedType = stationCodeCol ? 'station' : 'line';
+  // データ種別の初期判定: 駅コード優先 > 路線コード > その他は駅扱い
+  const detectedType = stationCodeCol ? 'station' : (lineCodeCol ? 'line' : 'station');
 
   // データ種別ラジオを初期化
   const modeLabels = document.querySelectorAll('#data-mode-toggle label');
@@ -480,13 +486,42 @@ function showMapping() {
   fillSelect(document.getElementById('map-station-code'),
     fields.map(f => ({ value: f, label: f })), stationCodeCol || fields[0]);
 
-  // 路線マッピング
-  const lineNameCol = fields.find(f => /路線名|line.?name|name/i.test(f)) || fields[0];
-  fillSelect(document.getElementById('map-line-name'),
-    fields.map(f => ({ value: f, label: f })), lineNameCol);
+  // 路線マッピング: 路線コード列のみ
+  fillSelect(document.getElementById('map-line-code'),
+    fields.map(f => ({ value: f, label: f })), lineCodeCol || fields[0]);
 
   rebuildKeywordList();
   updateStationMatchInfo();
+  updateLineMatchInfo();
+}
+
+// 路線コード列を見て、Atlasと一致する件数を表示
+function updateLineMatchInfo() {
+  const info = document.getElementById('line-match-info');
+  if (!info) return;
+  const dataMode = document.querySelector('input[name="data-mode"]:checked').value;
+  if (dataMode !== 'line') { info.textContent = ''; return; }
+  if (!state.atlas) {
+    info.innerHTML = '<span style="color:#888;">(Atlasは「マップを生成」時にロード)</span>';
+    return;
+  }
+  const codeCol = document.getElementById('map-line-code').value;
+  const validCodes = new Set(state.atlas.features.map(ft => ft.properties.code));
+  const rows = state.csv.rows;
+  let matched = 0, unmatched = 0;
+  const unmatchedSamples = [];
+  rows.forEach(r => {
+    const code = String(r[codeCol] || '').trim();
+    if (!code) { unmatched++; if (unmatchedSamples.length < 3) unmatchedSamples.push('(空欄)'); return; }
+    if (validCodes.has(code)) matched++;
+    else { unmatched++; if (unmatchedSamples.length < 3) unmatchedSamples.push(code); }
+  });
+  const total = rows.length;
+  if (unmatched === 0) {
+    info.innerHTML = `<span style="color:#16a34a;">✓ ${matched}件すべての路線コードが一致しました</span>`;
+  } else {
+    info.innerHTML = `<span style="color:#c00;">⚠ ${unmatched}/${total}件の路線コードがマスタに見つかりません (例: ${unmatchedSamples.join(', ')}…)。これらの行は描画されません</span>`;
+  }
 }
 
 // 駅コード列を見て、stations.json とJOINできる行数を表示
@@ -528,7 +563,11 @@ function rebuildKeywordList() {
       if (/^(駅名|station.?name|stn.?name|name)$/i.test(f)) excludeCols.add(f);
     });
   } else {
-    excludeCols.add(document.getElementById('map-line-name').value);
+    excludeCols.add(document.getElementById('map-line-code').value);
+    // 路線名・事業者列もキーワード候補から外す
+    fields.forEach(f => {
+      if (/^(路線名|事業者|line.?name|operator)$/i.test(f)) excludeCols.add(f);
+    });
   }
   const numericFields = fields.filter(f => {
     if (excludeCols.has(f)) return false;
@@ -562,9 +601,9 @@ document.getElementById('go-render').onclick = async () => {
     if (!codeCol) { alert('駅コード列を指定してください'); return; }
     state.mapping = { dataType, codeCol, kwCols };
   } else {
-    const nameCol = document.getElementById('map-line-name').value;
-    if (!nameCol) { alert('路線名列を指定してください'); return; }
-    state.mapping = { dataType, nameCol, kwCols };
+    const codeCol = document.getElementById('map-line-code').value;
+    if (!codeCol) { alert('路線コード列を指定してください'); return; }
+    state.mapping = { dataType, codeCol, kwCols };
   }
   await renderMap();
 };
@@ -572,10 +611,18 @@ document.getElementById('go-render').onclick = async () => {
 document.getElementById('link-reset').onclick = e => { e.preventDefault(); location.reload(); };
 
 // マッピング画面で列が変わった時のキーワードリスト再構築・駅一致情報の更新
-['map-station-code','map-line-name'].forEach(id => {
+['map-station-code','map-line-code'].forEach(id => {
   document.getElementById(id).addEventListener('change', () => {
     rebuildKeywordList();
     updateStationMatchInfo();
+    updateLineMatchInfo();
+  });
+});
+
+// データ種別タブ切替時にも match info を更新
+document.querySelectorAll('#data-mode-toggle label').forEach(l => {
+  l.addEventListener('click', () => {
+    setTimeout(updateLineMatchInfo, 0);
   });
 });
 
@@ -639,27 +686,36 @@ function buildFeatures() {
     }
     state._unmatched = unmatched;
   } else {
-    const { nameCol } = state.mapping;
-    // CSVを 路線名 → row のmapに (路線名のみで照合)
-    const rowByName = new Map();
+    const { codeCol } = state.mapping;
+    // CSVを 路線コード → row のmapに
+    const rowByCode = new Map();
+    const unmatched = [];
     state.csv.rows.forEach((row, i) => {
-      const lineName = String(row[nameCol] || '').trim();
-      if (!lineName || rowByName.has(lineName)) return;
-      rowByName.set(lineName, { row, lineName, idx: i });
+      const code = String(row[codeCol] || '').trim();
+      if (!code || rowByCode.has(code)) return;
+      rowByCode.set(code, { row, idx: i });
     });
-    // Atlas featureとjoin (路線名のみで照合)
+    // Atlas featureとjoin (路線コードで照合)
+    const atlasCodes = new Set(state.atlas.features.map(ft => ft.properties.code));
     state.atlas.features.forEach(ft => {
-      const lineName = ft.properties['路線名'];
-      const matched = rowByName.get(lineName);
+      const code = ft.properties.code;
+      const matched = rowByCode.get(code);
       if (!matched) return;
       const props = {
-        _id: 'l' + matched.idx + '-' + (ft.properties['事業者'] || ''),
-        _name: lineName,
-        _operator: ft.properties['事業者'] || '',  // Atlas由来の情報をツールチップに表示
+        _id: 'l-' + code,
+        _code: code,
+        _name: ft.properties['路線名'],
+        _operator: ft.properties['事業者'] || '',
       };
       kwCols.forEach(kw => { props['v_' + kw] = parseFloat(matched.row[kw]) || 0; });
       features.push({ type: 'line', geometry: ft.geometry, properties: props });
     });
+    // CSVにあるがAtlasに無い路線コードを警告用に拾う
+    rowByCode.forEach((_v, code) => { if (!atlasCodes.has(code)) unmatched.push(code); });
+    if (unmatched.length > 0) {
+      console.warn('[unmatched lines]', unmatched.length, '件', unmatched.slice(0, 10));
+    }
+    state._unmatched = unmatched;
   }
   state.features = features;
 }

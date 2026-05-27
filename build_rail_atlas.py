@@ -5,8 +5,11 @@
 路線名+事業者でmerge → shapelyで頂点間引き → 単一GeoJSONとして
 rail-builder/japan-rail-lines.geojson に出力。
 
-このAtlasはWebビルダーに静的バンドルされ、CSVの「路線名+事業者」と
-joinできる形式: properties.路線名, 事業者, 事業者元 を持つ。
+このAtlasはWebビルダーに静的バンドルされ、CSVの「路線コード」と
+joinできる形式: properties.code (L+4桁ゼロ埋め), 路線名, 事業者, 事業者元 を持つ。
+- code は (路線名, 事業者表示名) を辞書順ソートして連番採番。
+  路線名の異表記や事業者集約変更があった場合は安定しないため、
+  公開後は OUTPUT_ALIAS との互換性を別途検討すること。
 
 実行:
     python3 build_rail_atlas.py
@@ -85,9 +88,12 @@ def main() -> None:
     print(f"   路線数(merge前): {sum(len(g) for g in groups.values())}, グループ後: {len(groups)}")
 
     # 各グループのジオメトリをunion → simplify
+    # 路線コード採番のため、(路線名, 事業者表示名) を辞書順ソート
     out_features = []
     failed = 0
-    for (name, op_display), items in groups.items():
+    sorted_keys = sorted(groups.keys())
+    for idx, (name, op_display) in enumerate(sorted_keys, start=1):
+        items = groups[(name, op_display)]
         try:
             shapes = []
             for _, geom in items:
@@ -106,9 +112,11 @@ def main() -> None:
             geom_out = mapping(simplified)
             geom_out["coordinates"] = round_coords(geom_out["coordinates"])
             op_original = items[0][0]
+            code = f"L{idx:04d}"
             out_features.append({
                 "type": "Feature",
                 "properties": {
+                    "code": code,
                     "路線名": name,
                     "事業者": op_display,
                     "事業者元": op_original,
