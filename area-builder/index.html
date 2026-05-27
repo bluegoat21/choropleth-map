@@ -239,7 +239,7 @@
   <header class="app-header">
     <h1>📊 Area Builder — エリア別検索Vol可視化ツール</h1>
     <div class="links">
-      <a href="#" id="link-reset">最初に戻る</a>
+      <a href="../" id="link-reset">最初に戻る</a>
     </div>
   </header>
 
@@ -470,11 +470,6 @@ document.getElementById('go-render').onclick = async () => {
   }
   state.mapping = { codeCol, nameCol, kwCols };
   await loadAtlasAndRender();
-};
-
-document.getElementById('link-reset').onclick = e => {
-  e.preventDefault();
-  location.reload();
 };
 
 // ========================================================================
