@@ -420,6 +420,9 @@ function loadEmbeddedSnapshot() {
     document.getElementById('mapping-screen').style.display = 'none';
     document.getElementById('map-screen').style.display = 'block';
     if (snap.title) document.getElementById('map-title').value = snap.title;
+    // loading 表示が残っていれば消す (保存時のスナップショットで残ってしまった場合の保険)
+    const loadingEl = document.getElementById('loading');
+    if (loadingEl) loadingEl.classList.add('hide');
     // 地図の初期化と描画
     initMap();
     buildControlPanel();
@@ -1263,8 +1266,18 @@ function doExportHTML() {
   const tStart = performance.now();
   console.log('[exportHTML] start');
   try {
+    // outerHTML を取得する前に「HTML生成中...」表示の loading 要素を一時的にhide
+    // (そうしないと保存先HTMLでloading表示が残り続ける)
+    const loadingEl = document.getElementById('loading');
+    const wasShowingLoading = loadingEl && !loadingEl.classList.contains('hide');
+    if (loadingEl) loadingEl.classList.add('hide');
+
     const doctype = '<!DOCTYPE html>\n';
     const html = document.documentElement.outerHTML;
+
+    // outerHTML 取得が終わったので、現在のページのloading表示は元に戻す
+    if (wasShowingLoading && loadingEl) loadingEl.classList.remove('hide');
+
     console.log('[exportHTML] outerHTML:', html.length, 'bytes,', Math.round(performance.now() - tStart), 'ms');
 
     const snapshot = {
