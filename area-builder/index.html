@@ -694,11 +694,13 @@ function restyle() {
 function buildTooltip(p) {
   let html = `<div style="font-weight:600;margin-bottom:4px;">${escape(p._name)}</div>`;
   html += '<table style="font-size:11px;margin-top:4px;border-collapse:collapse;">';
+  let totalAll = 0;
   state.mapping.kwCols.forEach(kw => {
-    const v = p['v_' + kw];
-    html += `<tr><td style="padding-right:8px;">${escape(kw)}:</td><td style="text-align:right;">${(v||0).toLocaleString()}</td></tr>`;
+    const v = p['v_' + kw] || 0;
+    totalAll += v;
+    html += `<tr><td style="padding-right:8px;">${escape(kw)}:</td><td style="text-align:right;">${v.toLocaleString()}</td></tr>`;
   });
-  if (p._total !== null) html += `<tr style="border-top:1px solid #ddd;"><td style="padding-right:8px;font-weight:600;">合計:</td><td style="text-align:right;">${p._total.toLocaleString()}</td></tr>`;
+  html += `<tr style="border-top:1px solid #ddd;"><td style="padding-right:8px;font-weight:600;">合計:</td><td style="text-align:right;">${totalAll.toLocaleString()}</td></tr>`;
   html += '</table>';
   return html;
 }
