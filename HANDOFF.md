@@ -8,7 +8,7 @@
 
 ## 1. プロジェクト概要
 
-**「CSVをドラッグ&ドロップするだけで日本地図上の検索ボリュームを可視化する」** ブラウザツール集。完全クライアントサイド(CSVデータは外部送信されない)。
+**「CSVをドラッグ&ドロップするだけで日本地図上の検索ボリュームを可視化する」** ブラウザツール集。基本は完全クライアントサイド処理だが、**URL共有機能のみ Supabase バックエンドを使用** (詳細は §14)。将来的に会員制サービスサイトへの拡張を見据えた構成。
 
 ### ツール構成 (3つの Webツール)
 
@@ -122,9 +122,9 @@ L.geoJSON で線として描画 (太さ=Vol、色濃度=Vol)
 - ✅ **差分マップ** (2列の比率対比、赤(A優勢)→白(拮抗)→青(B優勢))
 - ✅ 最小値フィルタ
 - ✅ キーワード個別選択 / プリセット (Area Builder) / 全選択・全解除
-- ✅ URL状態保存 (`?mode=heat&kw=...&filter=...&title=...`)
 - ✅ PNG画像エクスポート (dom-to-image)
 - ✅ **HTMLとして保存** (自己完結HTMLとしてダウンロード)
+- ✅ **URLで共有** (Supabase 経由、`?s=xxxxxxxx` の短縮URL発行、3ヶ月保持)
 - ✅ コントロールパネル・凡例の最小化
 - ✅ タイトル編集
 
@@ -138,12 +138,22 @@ L.geoJSON で線として描画 (太さ=Vol、色濃度=Vol)
 - ✅ ツールチップに 駅名/路線名/事業者/路線リスト/全キーワード値
 - ✅ 路線コード一覧CSV (`lines-list.csv`) ダウンロードボタン
 
-### 共有HTML (exportHTMLで保存されたファイル) 特有
+### 共有HTML / 共有URL 共通 (閲覧専用UI)
 - ✅ 開いた時に自動で map-screen に遷移 (アップロード画面スキップ)
 - ✅ ヘッダー (ホーム/最初に戻るリンク) を非表示 → 閲覧専用UI
 - ✅ 保存・共有ボタンを非表示
 - ✅ map高さを 100vh に拡張 (ヘッダー分回収)
+- ✅ 共通の `applySnapshot(snap, { viewOnly: true })` 関数を経由 (DRY)
+
+### 共有HTML (exportHTMLで保存されたファイル) 固有
 - ✅ Atlas/stations を内包 or features直接埋込で自己完結 (Area Builder は 170KB、Rail Builderは660KB〜1MB)
+
+### 共有URL (Supabase) 固有
+- ✅ snapshot は Supabase の `shared_maps` テーブルに JSONB で保存
+- ✅ Rail Builder は atlas/stations を含めない (閲覧側で再fetch、Supabase容量節約)
+- ✅ Area Builder は features (JOIN後の軽量データ) を含める (Atlas 9.6MB 再fetch回避)
+- ✅ view_count を Supabase RPC でインクリメント
+- ✅ 3ヶ月で自動削除 (pg_cron で毎日 `0 3 * * *`)
 
 ---
 
@@ -250,6 +260,51 @@ function computeDiffScores() {
 }
 ```
 
+### URL共有 (Supabase) の仕組み (両ツール共通パターン)
+
+```js
+// CDN から SDK
+// <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// 共有ID: 紛らわしい文字を除いた alphanum 8文字 (例: a3f9b2c1)
+function genShareId() {
+  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
+  let id = '';
+  for (let i = 0; i < 8; i++) id += chars[Math.floor(Math.random() * chars.length)];
+  return id;
+}
+
+// 共有URLを発行
+async function shareURL() {
+  const id = genShareId();
+  const snapshot = { csv, mapping, mode, selectedKws, diffCols, minFilter, title, ... };
+  const { error } = await sb.from('shared_maps').insert({
+    id, tool: 'area-builder',  // or 'rail-builder'
+    snapshot, title,
+  });
+  const url = `${location.origin}${location.pathname}?s=${id}`;
+  await navigator.clipboard.writeText(url);
+}
+
+// ?s=xxxxxxxx で復元
+async function loadSharedSnapshot() {
+  const id = new URLSearchParams(location.search).get('s');
+  if (!id) return false;
+  const { data, error } = await sb
+    .from('shared_maps')
+    .select('snapshot, title, tool')
+    .eq('id', id)
+    .maybeSingle();
+  if (!data || data.tool !== 'area-builder') return false;
+  sb.rpc('increment_view_count', { map_id: id });  // fire and forget
+  await applySnapshot(data.snapshot, { viewOnly: true });
+  return true;
+}
+```
+
+**重要**: `applySnapshot` は exportHTML 経由の `loadEmbeddedSnapshot` と Supabase 経由の `loadSharedSnapshot` で共通化。両者の差は「snapshot をどこから取ってくるか」だけ。
+
 ---
 
 ## 7. 既知の制約・注意点
@@ -276,6 +331,12 @@ function computeDiffScores() {
 - main branch に push すると自動デプロイ (1〜2分)
 - `.nojekyll` で Jekyll処理を無効化済み
 - アクセス確認: `curl -sI https://bluegoat21.github.io/choropleth-map/...`
+
+### Supabase anon key の運用
+- anon key は両ツールの HTML に直書きしているが、RLS (Row Level Security) で保護されているので公開しても問題ない
+- 万一漏洩しても、できることは「INSERT (snapshot 追加)」と「SELECT (snapshot 取得)」のみ。他人のデータ書き換え/削除は不可
+- ⚠ `service_role` キーは絶対にクライアントに置かない (RLSバイパス全権)
+- 将来 abuse 対策が必要なら: Cloudflare Turnstile 等を挟む、レート制限、Supabase Edge Function 経由化など
 
 ---
 
@@ -333,8 +394,15 @@ open('rail-builder/stations.json','w').write(json.dumps(out,ensure_ascii=False,s
 - [ ] **CSV分離ヘルパー**: 6,418行のような混在CSVから「駅のみ」「路線のみ」を抽出する UIまたはスクリプト
 - [ ] **lines-list.csv 同等の駅一覧CSV**: 駅コード→駅名→事業者のリファレンスをダウンロード可能に (現在 stations.json は JSONなので人間が見にくい)
 - [ ] **キーワード調査の地方拡充**: 四国・沖縄・九州・北海道の検索Volを取得 (mcp__keyword-volume使用、過去履歴参照)
+- [ ] **共有URL の管理UI**: 自分が作った共有URLの一覧/削除 (会員機能の入り口)
 
-### 中期
+### 中期 (会員制サイトへの拡張)
+- [ ] **Supabase Auth 連携**: Email + Magic Link or Google OAuth (URL共有時にユーザー紐付け)
+- [ ] **shared_maps に user_id 列追加**: 自分のマップは編集/削除可能に (RLSポリシー更新)
+- [ ] **ダッシュボード**: 過去に作ったマップ一覧、view_count 確認
+- [ ] **有料プラン分岐 (Stripe)**: 公開マップ件数制限、保持期間延長、独自ドメイン共有URL など
+
+### 中期 (機能拡張)
 - [ ] **builderとrail-builderの統合UI**: 1つのページで「エリア/駅/路線」をタブ切替できるよう
 - [ ] **複数CSVの重ね合わせ**: エリア+駅+路線を同一マップに重ねて表示
 - [ ] **stations.jsonの軽量化**: 駅名以外を別ファイルに分割 (現状656KBは少し重い)
@@ -343,12 +411,18 @@ open('rail-builder/stations.json','w').write(json.dumps(out,ensure_ascii=False,s
 ### 長期
 - [ ] **CDN非依存化**: Leaflet等をローカルバンドル (完全オフライン)
 - [ ] **PWA化**: オフラインキャッシュ、ホーム画面追加
+- [ ] **OGP対応**: 共有URLのプレビュー画像生成 (Supabase Edge Function で Puppeteer 等)
 
 ---
 
 ## 11. 主要コミット履歴 (最近)
 
 ```
+9840200 rail-builder: Supabase 経由のURL共有機能を実装
+35f7a42 area-builder: Supabase 経由のURL共有機能を実装
+c40e92c area-builder: 「最初に戻る」リンクをランディングページに遷移するよう変更
+e34e07e area-builder: ヘッダー右上の「ソース」リンクを削除
+c8ec486 area-builder: ツールチップ合計をCSVの合計列ではなく全キーワード合計に修正
 940bfe6 共有HTMLを閲覧専用UIに (ヘッダー/保存ボタン非表示)
 96b14e9 area-builder: HTML保存機能を実装 (rail-builderから移植)
 4c84e1c rail-builder: 保存HTMLでマーカー表示されない問題を修正
@@ -389,10 +463,120 @@ dae6e59 Initial commit
 ローカル: /Users/radiata/claude-code/choropleth-map/
 
 3つのツール (area-builder, rail-builder, ランディング) で全機能実装済み。
+URL共有機能は Supabase バックエンド (有料プラン) を使用。
 詳細仕様・既知制約・次の開発候補は HANDOFF.md を参照してください。
 
 今回のタスク: 【ここに依頼内容】
 ```
+
+---
+
+## 14. Supabase バックエンド (URL共有機能)
+
+将来の会員制サービスサイト化を見越して Supabase を選択。現状は URL 共有機能のみで使用。
+
+### 接続情報
+
+| 項目 | 値 |
+|---|---|
+| Project URL | `https://teqxxdveckinvyomfxoj.supabase.co` |
+| anon key | `eyJhbGciOi...` (両ツールの `<script>` 内に直書き) |
+| プラン | 有料プラン (詳細はオーナーに確認) |
+
+接続情報は area-builder/index.html と rail-builder/index.html の `SUPABASE_URL`, `SUPABASE_ANON_KEY` 定数に直書き。
+
+### テーブル定義: `shared_maps`
+
+```sql
+CREATE TABLE shared_maps (
+  id TEXT PRIMARY KEY,           -- 8文字ランダム英数字 (例: 'a3f9b2c1')
+  tool TEXT NOT NULL CHECK (tool IN ('area-builder', 'rail-builder')),
+  snapshot JSONB NOT NULL,       -- exportHTML 同等のスナップショット
+  title TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  view_count INT DEFAULT 0
+);
+CREATE INDEX idx_shared_maps_created_at ON shared_maps(created_at);
+```
+
+### RLS ポリシー
+
+| 操作 | 匿名ユーザー | 備考 |
+|---|---|---|
+| INSERT | ✅ 許可 | RLSで誰でも INSERT 可 (`anon can insert`) |
+| SELECT | ✅ 許可 | RLSで誰でも SELECT 可 (`anon can select`) |
+| UPDATE | ❌ 不可 | view_count は RPC (SECURITY DEFINER) 経由でのみ |
+| DELETE | ❌ 不可 | pg_cron の自動削除のみ |
+
+### RPC: `increment_view_count`
+
+```sql
+CREATE OR REPLACE FUNCTION increment_view_count(map_id TEXT)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  UPDATE shared_maps SET view_count = view_count + 1 WHERE id = map_id;
+END;
+$$;
+```
+
+クライアントから `sb.rpc('increment_view_count', { map_id: id })` で呼ぶ。RLS をバイパスして view_count のみ更新。
+
+### 自動削除 (pg_cron)
+
+```sql
+SELECT cron.schedule(
+  'delete-old-shared-maps',
+  '0 3 * * *',  -- 毎日 03:00 UTC (日本時間 12:00)
+  $$DELETE FROM shared_maps WHERE created_at < NOW() - INTERVAL '3 months'$$
+);
+```
+
+確認: `SELECT * FROM cron.job;` で jobid とスケジュールが見える。
+
+### Snapshot の構造
+
+#### Area Builder
+```js
+{
+  csv: string,                  // CSV 全文
+  mapping: { codeCol, nameCol, kwCols },
+  features: GeoJSON.Feature[],  // JOIN後の軽量データ (Atlas 9.6MB 再fetch回避)
+  mode: 'heat' | 'diff',
+  selectedKws: string[],
+  diffCols: { a: string, b: string },
+  minFilter: number,
+  title: string,
+}
+```
+
+#### Rail Builder
+```js
+{
+  csv: string,
+  mapping: { dataType: 'station' | 'line', codeCol, kwCols },
+  mode, selectedKws, diffCols, minFilter, title,
+  // atlas / stations は含めない (閲覧側で fetch、容量節約)
+}
+```
+
+### 共有URL の生成・復元フロー
+
+```
+[生成]
+ユーザー操作 → shareURL() → genShareId() → INSERT → URL生成 → クリップボード
+
+[復元]
+ページロード → ?s=xxxxxxxx を検出 → SELECT → applySnapshot(snap, { viewOnly: true })
+                                  → increment_view_count RPC (fire & forget)
+```
+
+### 将来の会員機能拡張ポイント
+
+1. **`shared_maps` に `user_id UUID REFERENCES auth.users(id)` 列を追加**
+2. **RLS ポリシー更新**: 自分の所有マップのみ UPDATE/DELETE 可能に
+3. **Supabase Auth** (Email/Google) を追加: Magic Link が UX 軽量で推奨
+4. **ダッシュボードページ** `/dashboard/` を追加: 過去マップ一覧、view_count 表示
+5. **Stripe 連携**: 有料プランで保持期間延長・件数制限解除
 
 ---
 
