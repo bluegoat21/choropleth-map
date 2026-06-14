@@ -323,7 +323,7 @@
       <div class="dropdown-menu" id="export-menu">
         <button data-export="png">🖼 PNG画像として保存</button>
         <button data-export="html">📄 HTMLとして保存 <span style="color:#888;font-size:11px;">(オフラインで再表示可)</span></button>
-        <button data-export="url">🔗 URLで共有 <span style="color:#888;font-size:11px;">(短いリンクで他人と共有・3ヶ月保持)</span></button>
+        <button data-export="url">🔗 設定リンクをコピー</button>
       </div>
     </div>
     <div id="control-panel"></div>
@@ -344,7 +344,6 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script src="https://unpkg.com/dom-to-image@2.6.0/dist/dom-to-image.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 // ============================================================
 // Rail Builder — メインロジック
@@ -352,11 +351,6 @@
 
 const ATLAS_LINES_URL = 'japan-rail-lines.geojson';
 const STATIONS_URL = 'stations.json';
-
-// Supabase (URL共有用)
-const SUPABASE_URL = 'https://teqxxdveckinvyomfxoj.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRlcXh4ZHZlY2tpbnZ5b21meG9qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5MDY2OTAsImV4cCI6MjA5NTQ4MjY5MH0.gGvBah5UrovqO0qO3tHFgtTKmfEhkHR6pmjufZS1jtU';
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const state = {
   csv: null,
@@ -471,50 +465,10 @@ async function loadEmbeddedSnapshot() {
   }
 }
 
-// Supabase からの共有マップ復元 (?s=xxxxxxxx)
-async function loadSharedSnapshot() {
-  const params = new URLSearchParams(location.search);
-  const id = params.get('s');
-  if (!id) return false;
-  showLoading('共有マップ読み込み中...');
-  try {
-    const { data, error } = await sb
-      .from('shared_maps')
-      .select('snapshot, title, tool')
-      .eq('id', id)
-      .maybeSingle();
-    if (error) throw error;
-    if (!data) throw new Error('共有マップが見つかりません (URLが間違っているか、期限切れの可能性があります)');
-    if (data.tool !== 'rail-builder') {
-      throw new Error('このURLは別のツール(' + data.tool + ')用です');
-    }
-    // view_count 加算 (失敗しても無視)
-    sb.rpc('increment_view_count', { map_id: id }).then(() => {}, () => {});
-    await applySnapshot(data.snapshot, { viewOnly: true });
-    console.log('[shared] 共有マップを復元:', id);
-    return true;
-  } catch (e) {
-    console.error('[shared] 読み込み失敗:', e);
-    alert('共有マップの読み込み失敗: ' + (e.message || e));
-    return false;
-  } finally {
-    hideLoading();
-  }
-}
-
-// 初期ロード: 共有ID → 自己完結HTML の順で試行
-async function initFromURL() {
-  const params = new URLSearchParams(location.search);
-  if (params.get('s')) {
-    await loadSharedSnapshot();
-  } else {
-    await loadEmbeddedSnapshot();
-  }
-}
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initFromURL);
+  document.addEventListener('DOMContentLoaded', loadEmbeddedSnapshot);
 } else {
-  initFromURL();
+  loadEmbeddedSnapshot();
 }
 
 // ============================================================
@@ -1306,51 +1260,11 @@ document.getElementById('map-title').addEventListener('input', updateURLParams);
 // ============================================================
 // エクスポート
 // ============================================================
-// 共有ID生成 (8文字、紛らわしい文字除外)
-function genShareId() {
-  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
-  let id = '';
-  for (let i = 0; i < 8; i++) id += chars[Math.floor(Math.random() * chars.length)];
-  return id;
-}
-// URL共有 (Supabase に snapshot を保存して短いURLを発行)
-// atlas/stations は閲覧側でプリロード or fetch するため snapshot に含めない (サイズ節約)
-async function shareURL() {
-  if (!state.csv || !state.mapping) {
-    alert('まずCSVを読み込んでマップを生成してください');
-    return;
-  }
-  showLoading('共有URL生成中...');
-  try {
-    const id = genShareId();
-    const title = document.getElementById('map-title').value || '';
-    const snapshot = {
-      csv: state.csv,
-      mapping: state.mapping,
-      mode: state.mode,
-      selectedKws: state.selectedKws,
-      diffCols: state.diffCols,
-      minFilter: state.minFilter,
-      title,
-      // atlas / stations は閲覧側で fetch するので含めない
-    };
-    const { error } = await sb.from('shared_maps').insert({
-      id, tool: 'rail-builder', snapshot, title,
-    });
-    if (error) throw error;
-    const url = `${location.origin}${location.pathname}?s=${id}`;
-    try {
-      await navigator.clipboard.writeText(url);
-      alert('共有URLをクリップボードにコピーしました:\n' + url + '\n\n※ 3ヶ月で自動削除されます');
-    } catch (_) {
-      prompt('共有URL (Cmd+Cでコピー):', url);
-    }
-  } catch (e) {
-    console.error('[shareURL] error:', e);
-    alert('共有URL生成失敗: ' + (e.message || e));
-  } finally {
-    hideLoading();
-  }
+function shareURL() {
+  updateURLParams();
+  navigator.clipboard.writeText(location.href).then(() => {
+    alert('現在の設定URLをコピーしました:\n' + location.href);
+  });
 }
 function exportPNG() {
   showLoading('PNG生成中...');

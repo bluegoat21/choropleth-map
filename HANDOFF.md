@@ -8,7 +8,9 @@
 
 ## 1. プロジェクト概要
 
-**「CSVをドラッグ&ドロップするだけで日本地図上の検索ボリュームを可視化する」** ブラウザツール集。基本は完全クライアントサイド処理だが、**URL共有機能のみ Supabase バックエンドを使用** (詳細は §14)。将来的に会員制サービスサイトへの拡張を見据えた構成。
+**「CSVをドラッグ&ドロップするだけで日本地図上の検索ボリュームを可視化する」** ブラウザツール集。完全クライアントサイド処理(CSVデータは外部送信されない)。
+
+> ⚠️ **URL共有機能 (Supabase バックエンド) は 2026-06-14 にコスト削減のため凍結**。復活手順は §14 参照。将来的に会員制サービスサイトへの拡張を見据えた構成は維持。
 
 ### ツール構成 (3つの Webツール)
 
@@ -124,7 +126,8 @@ L.geoJSON で線として描画 (太さ=Vol、色濃度=Vol)
 - ✅ キーワード個別選択 / プリセット (Area Builder) / 全選択・全解除
 - ✅ PNG画像エクスポート (dom-to-image)
 - ✅ **HTMLとして保存** (自己完結HTMLとしてダウンロード)
-- ✅ **URLで共有** (Supabase 経由、`?s=xxxxxxxx` の短縮URL発行、3ヶ月保持)
+- ✅ 設定リンクをコピー (`?mode=...&kw=...&filter=...&title=...` を含むURLをクリップボードへ)
+- 🧊 ~~URLで共有 (Supabase経由の短縮URL)~~ — コスト削減のため 2026-06-14 凍結 (復活手順 §14)
 - ✅ コントロールパネル・凡例の最小化
 - ✅ タイトル編集
 
@@ -138,22 +141,13 @@ L.geoJSON で線として描画 (太さ=Vol、色濃度=Vol)
 - ✅ ツールチップに 駅名/路線名/事業者/路線リスト/全キーワード値
 - ✅ 路線コード一覧CSV (`lines-list.csv`) ダウンロードボタン
 
-### 共有HTML / 共有URL 共通 (閲覧専用UI)
+### 共有HTML (exportHTMLで保存されたファイル) 閲覧専用UI
 - ✅ 開いた時に自動で map-screen に遷移 (アップロード画面スキップ)
-- ✅ ヘッダー (ホーム/最初に戻るリンク) を非表示 → 閲覧専用UI
+- ✅ ヘッダー (ホーム/最初に戻るリンク) を非表示
 - ✅ 保存・共有ボタンを非表示
 - ✅ map高さを 100vh に拡張 (ヘッダー分回収)
-- ✅ 共通の `applySnapshot(snap, { viewOnly: true })` 関数を経由 (DRY)
-
-### 共有HTML (exportHTMLで保存されたファイル) 固有
 - ✅ Atlas/stations を内包 or features直接埋込で自己完結 (Area Builder は 170KB、Rail Builderは660KB〜1MB)
-
-### 共有URL (Supabase) 固有
-- ✅ snapshot は Supabase の `shared_maps` テーブルに JSONB で保存
-- ✅ Rail Builder は atlas/stations を含めない (閲覧側で再fetch、Supabase容量節約)
-- ✅ Area Builder は features (JOIN後の軽量データ) を含める (Atlas 9.6MB 再fetch回避)
-- ✅ view_count を Supabase RPC でインクリメント
-- ✅ 3ヶ月で自動削除 (pg_cron で毎日 `0 3 * * *`)
+- ✅ 共通の `applySnapshot(snap, { viewOnly: true })` 関数を経由 (DRY、Supabase復活時に流用可)
 
 ---
 
@@ -260,50 +254,10 @@ function computeDiffScores() {
 }
 ```
 
-### URL共有 (Supabase) の仕組み (両ツール共通パターン)
+### 🧊 URL共有 (Supabase) の仕組み — 2026-06-14 凍結
 
-```js
-// CDN から SDK
-// <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-// 共有ID: 紛らわしい文字を除いた alphanum 8文字 (例: a3f9b2c1)
-function genShareId() {
-  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
-  let id = '';
-  for (let i = 0; i < 8; i++) id += chars[Math.floor(Math.random() * chars.length)];
-  return id;
-}
-
-// 共有URLを発行
-async function shareURL() {
-  const id = genShareId();
-  const snapshot = { csv, mapping, mode, selectedKws, diffCols, minFilter, title, ... };
-  const { error } = await sb.from('shared_maps').insert({
-    id, tool: 'area-builder',  // or 'rail-builder'
-    snapshot, title,
-  });
-  const url = `${location.origin}${location.pathname}?s=${id}`;
-  await navigator.clipboard.writeText(url);
-}
-
-// ?s=xxxxxxxx で復元
-async function loadSharedSnapshot() {
-  const id = new URLSearchParams(location.search).get('s');
-  if (!id) return false;
-  const { data, error } = await sb
-    .from('shared_maps')
-    .select('snapshot, title, tool')
-    .eq('id', id)
-    .maybeSingle();
-  if (!data || data.tool !== 'area-builder') return false;
-  sb.rpc('increment_view_count', { map_id: id });  // fire and forget
-  await applySnapshot(data.snapshot, { viewOnly: true });
-  return true;
-}
-```
-
-**重要**: `applySnapshot` は exportHTML 経由の `loadEmbeddedSnapshot` と Supabase 経由の `loadSharedSnapshot` で共通化。両者の差は「snapshot をどこから取ってくるか」だけ。
+> コード上は削除済み。コミット履歴 (35f7a42, 9840200) と §14 に詳細な復活手順あり。
+> `applySnapshot(snap, { viewOnly: true })` 共通関数は残してあるので、復活時はそのまま流用可。
 
 ---
 
@@ -332,11 +286,9 @@ async function loadSharedSnapshot() {
 - `.nojekyll` で Jekyll処理を無効化済み
 - アクセス確認: `curl -sI https://bluegoat21.github.io/choropleth-map/...`
 
-### Supabase anon key の運用
-- anon key は両ツールの HTML に直書きしているが、RLS (Row Level Security) で保護されているので公開しても問題ない
-- 万一漏洩しても、できることは「INSERT (snapshot 追加)」と「SELECT (snapshot 取得)」のみ。他人のデータ書き換え/削除は不可
-- ⚠ `service_role` キーは絶対にクライアントに置かない (RLSバイパス全権)
-- 将来 abuse 対策が必要なら: Cloudflare Turnstile 等を挟む、レート制限、Supabase Edge Function 経由化など
+### 🧊 Supabase 運用 (凍結中)
+- URL共有機能は 2026-06-14 に凍結されたため、現在 Supabase へのアクセスはなし
+- 復活手順は §14 参照
 
 ---
 
@@ -394,9 +346,10 @@ open('rail-builder/stations.json','w').write(json.dumps(out,ensure_ascii=False,s
 - [ ] **CSV分離ヘルパー**: 6,418行のような混在CSVから「駅のみ」「路線のみ」を抽出する UIまたはスクリプト
 - [ ] **lines-list.csv 同等の駅一覧CSV**: 駅コード→駅名→事業者のリファレンスをダウンロード可能に (現在 stations.json は JSONなので人間が見にくい)
 - [ ] **キーワード調査の地方拡充**: 四国・沖縄・九州・北海道の検索Volを取得 (mcp__keyword-volume使用、過去履歴参照)
-- [ ] **共有URL の管理UI**: 自分が作った共有URLの一覧/削除 (会員機能の入り口)
+- [ ] **LZ-String URL共有**: Supabaseに依存しない短縮なし共有URL (`#data=` ハッシュに圧縮埋込)。URL長制限はあるが、CSVが小さい案件では Supabase復活より低コスト
 
-### 中期 (会員制サイトへの拡張)
+### 中期 (会員制サイトへの拡張 — Supabase 復活が前提)
+- [ ] **URL共有機能の復活** (§14 の手順)
 - [ ] **Supabase Auth 連携**: Email + Magic Link or Google OAuth (URL共有時にユーザー紐付け)
 - [ ] **shared_maps に user_id 列追加**: 自分のマップは編集/削除可能に (RLSポリシー更新)
 - [ ] **ダッシュボード**: 過去に作ったマップ一覧、view_count 確認
@@ -418,8 +371,10 @@ open('rail-builder/stations.json','w').write(json.dumps(out,ensure_ascii=False,s
 ## 11. 主要コミット履歴 (最近)
 
 ```
-9840200 rail-builder: Supabase 経由のURL共有機能を実装
-35f7a42 area-builder: Supabase 経由のURL共有機能を実装
+(未push) 両ツール: Supabase 依存を全削除 (URL共有機能を凍結)
+7ed638e HANDOFF.md: URL共有機能(Supabase) の詳細を追記
+9840200 rail-builder: Supabase 経由のURL共有機能を実装 (凍結済み)
+35f7a42 area-builder: Supabase 経由のURL共有機能を実装 (凍結済み)
 c40e92c area-builder: 「最初に戻る」リンクをランディングページに遷移するよう変更
 e34e07e area-builder: ヘッダー右上の「ソース」リンクを削除
 c8ec486 area-builder: ツールチップ合計をCSVの合計列ではなく全キーワード合計に修正
@@ -471,46 +426,79 @@ URL共有機能は Supabase バックエンド (有料プラン) を使用。
 
 ---
 
-## 14. Supabase バックエンド (URL共有機能)
+## 14. 🧊 URL共有 (Supabase バックエンド) — 凍結中の復活手順
 
-将来の会員制サービスサイト化を見越して Supabase を選択。現状は URL 共有機能のみで使用。
+**凍結日**: 2026-06-14
+**凍結理由**: 月額利用コスト削減のため、Supabase プロジェクトを廃止
+**凍結時点で実装済みだった内容**: 「URLで共有」ボタン → snapshot を `shared_maps` テーブルに INSERT → `?s=xxxxxxxx` の8文字短縮URLを発行 → 閲覧者アクセスで Supabase から SELECT → 閲覧専用UIで表示。3ヶ月で自動削除(pg_cron)。
 
-### 接続情報
+### 凍結時に削除されたもの
 
-| 項目 | 値 |
+| 種類 | 内容 |
 |---|---|
-| Project URL | `https://teqxxdveckinvyomfxoj.supabase.co` |
-| anon key | `eyJhbGciOi...` (両ツールの `<script>` 内に直書き) |
-| プラン | 有料プラン (詳細はオーナーに確認) |
+| Supabase プロジェクト | `teqxxdveckinvyomfxoj` (ユーザーが手動削除) |
+| `shared_maps` テーブル | プロジェクト削除に伴い消失 (要バックアップ後削除) |
+| クライアントコード | Supabase SDK 読み込み、`shareURL` の Supabase 版、`loadSharedSnapshot`、`initFromURL` |
 
-接続情報は area-builder/index.html と rail-builder/index.html の `SUPABASE_URL`, `SUPABASE_ANON_KEY` 定数に直書き。
+### 凍結時に保持されたもの (復活時に流用可能)
 
-### テーブル定義: `shared_maps`
+| 種類 | 場所 |
+|---|---|
+| `applySnapshot(snap, { viewOnly: true })` 共通関数 | area-builder/index.html, rail-builder/index.html |
+| 既存の `shareURL()` (旧仕様、URLをクリップボードコピー) | 両ツール、ユーザー操作のエントリポイント維持 |
+| メニュー項目 `data-export="url"` | 両ツール、ラベルだけ「設定リンクをコピー」に戻し済み |
+
+### 凍結時に参照すべきコミット
+
+| コミット | 内容 |
+|---|---|
+| [35f7a42](https://github.com/bluegoat21/choropleth-map/commit/35f7a42) | area-builder: Supabase 経由のURL共有機能を実装 |
+| [9840200](https://github.com/bluegoat21/choropleth-map/commit/9840200) | rail-builder: Supabase 経由のURL共有機能を実装 |
+| [7ed638e](https://github.com/bluegoat21/choropleth-map/commit/7ed638e) | HANDOFF.md: URL共有機能(Supabase) の詳細を追記 |
+
+復活時はこれらのコミットの diff を参考にすれば、当時の実装にほぼ戻せる。
+
+---
+
+### 📦 復活手順
+
+#### Step 1: 新しい Supabase プロジェクトを作成
+
+1. https://supabase.com/dashboard で「New Project」
+2. プロジェクト名・パスワード・リージョン(`Northeast Asia (Tokyo)` 推奨) を入力
+3. 作成後、`Settings` → `API` から取得:
+   - `Project URL` (例: `https://xxxxxxxxxxxx.supabase.co`)
+   - `anon` `public` key (`eyJ...`)
+   - ⚠ `service_role` キーは使わない・公開しない
+
+#### Step 2: テーブル + RLS + RPC を作成
+
+Supabase ダッシュボード → `SQL Editor` で実行:
 
 ```sql
-CREATE TABLE shared_maps (
+-- shared_maps テーブル
+CREATE TABLE IF NOT EXISTS shared_maps (
   id TEXT PRIMARY KEY,           -- 8文字ランダム英数字 (例: 'a3f9b2c1')
   tool TEXT NOT NULL CHECK (tool IN ('area-builder', 'rail-builder')),
-  snapshot JSONB NOT NULL,       -- exportHTML 同等のスナップショット
+  snapshot JSONB NOT NULL,
   title TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   view_count INT DEFAULT 0
 );
-CREATE INDEX idx_shared_maps_created_at ON shared_maps(created_at);
-```
+CREATE INDEX IF NOT EXISTS idx_shared_maps_created_at ON shared_maps(created_at);
 
-### RLS ポリシー
+-- RLS
+ALTER TABLE shared_maps ENABLE ROW LEVEL SECURITY;
 
-| 操作 | 匿名ユーザー | 備考 |
-|---|---|---|
-| INSERT | ✅ 許可 | RLSで誰でも INSERT 可 (`anon can insert`) |
-| SELECT | ✅ 許可 | RLSで誰でも SELECT 可 (`anon can select`) |
-| UPDATE | ❌ 不可 | view_count は RPC (SECURITY DEFINER) 経由でのみ |
-| DELETE | ❌ 不可 | pg_cron の自動削除のみ |
+DROP POLICY IF EXISTS "anon can insert" ON shared_maps;
+CREATE POLICY "anon can insert" ON shared_maps
+  FOR INSERT TO anon WITH CHECK (true);
 
-### RPC: `increment_view_count`
+DROP POLICY IF EXISTS "anon can select" ON shared_maps;
+CREATE POLICY "anon can select" ON shared_maps
+  FOR SELECT TO anon USING (true);
 
-```sql
+-- view_count 加算 RPC (SECURITY DEFINER で RLSバイパス)
 CREATE OR REPLACE FUNCTION increment_view_count(map_id TEXT)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$
 BEGIN
@@ -519,9 +507,9 @@ END;
 $$;
 ```
 
-クライアントから `sb.rpc('increment_view_count', { map_id: id })` で呼ぶ。RLS をバイパスして view_count のみ更新。
+#### Step 3: 自動削除ジョブを登録 (任意)
 
-### 自動削除 (pg_cron)
+`Database` → `Extensions` で `pg_cron` を ON にしてから:
 
 ```sql
 SELECT cron.schedule(
@@ -531,52 +519,133 @@ SELECT cron.schedule(
 );
 ```
 
-確認: `SELECT * FROM cron.job;` で jobid とスケジュールが見える。
+確認: `SELECT * FROM cron.job;`
 
-### Snapshot の構造
+#### Step 4: クライアントコードに Supabase を再導入
 
-#### Area Builder
+両ツール (`area-builder/index.html`, `rail-builder/index.html`) で:
+
+**1. SDK 読み込み追加** (`<head>` または `<body>` 末尾の他script群と並べる)
+```html
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+```
+
+**2. 接続情報と client 初期化を script 先頭付近に追加**
 ```js
-{
-  csv: string,                  // CSV 全文
-  mapping: { codeCol, nameCol, kwCols },
-  features: GeoJSON.Feature[],  // JOIN後の軽量データ (Atlas 9.6MB 再fetch回避)
-  mode: 'heat' | 'diff',
-  selectedKws: string[],
-  diffCols: { a: string, b: string },
-  minFilter: number,
-  title: string,
+const SUPABASE_URL = '<新プロジェクトのURL>';
+const SUPABASE_ANON_KEY = '<新プロジェクトのanon key>';
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+```
+
+**3. `shareURL()` を Supabase 版に置き換え** (既存の旧版を消す):
+```js
+function genShareId() {
+  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
+  let id = '';
+  for (let i = 0; i < 8; i++) id += chars[Math.floor(Math.random() * chars.length)];
+  return id;
+}
+async function shareURL() {
+  if (!state.csv || !state.mapping) { alert('まずCSV読み込み'); return; }
+  showLoading('共有URL生成中...');
+  try {
+    const id = genShareId();
+    const title = document.getElementById('map-title')?.value || '';
+    const snapshot = {
+      csv: state.csv, mapping: state.mapping, mode: state.mode,
+      selectedKws: state.selectedKws, diffCols: state.diffCols,
+      minFilter: state.minFilter, title,
+      // area-builder のみ: features: state.features を追加
+      // rail-builder は atlas/stations を含めない (閲覧側で fetch)
+    };
+    const { error } = await sb.from('shared_maps').insert({
+      id, tool: 'area-builder',  // rail-builder なら 'rail-builder'
+      snapshot, title,
+    });
+    if (error) throw error;
+    const url = `${location.origin}${location.pathname}?s=${id}`;
+    await navigator.clipboard.writeText(url);
+    alert('共有URLをクリップボードにコピーしました:\n' + url + '\n\n※ 3ヶ月で自動削除されます');
+  } catch (e) {
+    alert('共有URL生成失敗: ' + (e.message || e));
+  } finally { hideLoading(); }
 }
 ```
 
-#### Rail Builder
+**4. `loadSharedSnapshot` と `initFromURL` を追加して `loadEmbeddedSnapshot` 直呼びを置き換え**:
 ```js
-{
-  csv: string,
-  mapping: { dataType: 'station' | 'line', codeCol, kwCols },
-  mode, selectedKws, diffCols, minFilter, title,
-  // atlas / stations は含めない (閲覧側で fetch、容量節約)
+async function loadSharedSnapshot() {
+  const id = new URLSearchParams(location.search).get('s');
+  if (!id) return false;
+  showLoading('共有マップ読み込み中...');
+  try {
+    const { data, error } = await sb
+      .from('shared_maps').select('snapshot, title, tool')
+      .eq('id', id).maybeSingle();
+    if (error) throw error;
+    if (!data) throw new Error('共有マップが見つかりません');
+    if (data.tool !== 'area-builder') throw new Error('別ツール用URLです');
+    sb.rpc('increment_view_count', { map_id: id }).then(() => {}, () => {});
+    await applySnapshot(data.snapshot, { viewOnly: true });
+    return true;
+  } catch (e) {
+    alert('読み込み失敗: ' + e.message);
+    return false;
+  } finally { hideLoading(); }
 }
+async function initFromURL() {
+  if (new URLSearchParams(location.search).get('s')) await loadSharedSnapshot();
+  else await loadEmbeddedSnapshot();
+}
+// DOMContentLoaded のハンドラを initFromURL に差し替え
 ```
 
-### 共有URL の生成・復元フロー
-
-```
-[生成]
-ユーザー操作 → shareURL() → genShareId() → INSERT → URL生成 → クリップボード
-
-[復元]
-ページロード → ?s=xxxxxxxx を検出 → SELECT → applySnapshot(snap, { viewOnly: true })
-                                  → increment_view_count RPC (fire & forget)
+**5. メニュー項目のラベルを「🔗 URLで共有」に変更**:
+```html
+<button data-export="url">🔗 URLで共有 <span class="sub">(短いリンクで他人と共有・3ヶ月保持)</span></button>
 ```
 
-### 将来の会員機能拡張ポイント
+#### Step 5: ローカル動作確認 → push
 
-1. **`shared_maps` に `user_id UUID REFERENCES auth.users(id)` 列を追加**
-2. **RLS ポリシー更新**: 自分の所有マップのみ UPDATE/DELETE 可能に
-3. **Supabase Auth** (Email/Google) を追加: Magic Link が UX 軽量で推奨
-4. **ダッシュボードページ** `/dashboard/` を追加: 過去マップ一覧、view_count 表示
-5. **Stripe 連携**: 有料プランで保持期間延長・件数制限解除
+```bash
+python3 -m http.server 8000
+# http://localhost:8000/area-builder/ で CSV → マップ → 共有URL → 別タブで開く
+```
+
+---
+
+### 💾 凍結前のデータバックアップ手順 (ユーザー作業)
+
+Supabase プロジェクトを削除する前に、`shared_maps` の中身を保存しておくと、URLを再発行することなく過去の共有マップを復元できる。
+
+#### A) Table Editor から CSV エクスポート (推奨)
+1. ダッシュボード → `Table Editor` → `shared_maps`
+2. 右上の `...` メニュー → `Export data to CSV`
+3. ダウンロードした CSV を本リポジトリ外の安全な場所に保管
+
+#### B) SQL でJSONダンプ (snapshot をきれいに保持)
+SQL Editor で実行 → 結果を `Export` → JSON でダウンロード:
+```sql
+SELECT id, tool, snapshot, title, created_at, view_count
+FROM shared_maps
+ORDER BY created_at;
+```
+
+#### 復元時
+復活後の新プロジェクトに INSERT:
+```sql
+INSERT INTO shared_maps (id, tool, snapshot, title, created_at, view_count) VALUES
+('a3f9b2c1', 'area-builder', '{...}'::jsonb, 'タイトル', '2026-05-28', 0),
+...;
+```
+
+---
+
+### 🗑 Supabase プロジェクト削除手順 (ユーザー作業)
+
+1. (上記バックアップを取得してから) ダッシュボード → `Settings` → `General`
+2. 一番下までスクロール → `Danger Zone` → `Delete Project`
+3. プロジェクト名をタイプして確認
 
 ---
 
